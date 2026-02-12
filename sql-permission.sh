@@ -260,9 +260,14 @@ cmd_setup_user() {
     local grant_read=false
     local grant_write=false
     local grant_execute=false
+    local file=""
 
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --file)
+                file="$2"
+                shift 2
+                ;;
             --users)
                 users="$2"
                 shift 2
@@ -294,9 +299,17 @@ cmd_setup_user() {
         esac
     done
 
-    # 驗證必要參數
+    # 檢查是否使用檔案模式
+    if [ -n "$file" ]; then
+        # 從檔案讀取並處理
+        cmd_setup_user_from_file "$file"
+        return $?
+    fi
+
+    # 命令列模式：驗證必要參數
     if [ -z "$users" ]; then
         show_error "請使用 --users 指定使用者名稱（可用逗號分隔多個使用者）"
+        echo "或使用 --file 指定設定檔"
         exit 1
     fi
 
@@ -309,6 +322,26 @@ cmd_setup_user() {
         show_error "請使用 --password 指定密碼"
         exit 1
     fi
+
+    # 呼叫內部處理函式
+    setup_user_internal "$users" "$databases" "$password" "$grant_read" "$grant_write" "$grant_execute"
+}
+
+# 內部處理函式：設定單組使用者
+# 參數：
+#   $1 = users (逗號分隔)
+#   $2 = databases (逗號分隔)
+#   $3 = password
+#   $4 = grant_read (true/false)
+#   $5 = grant_write (true/false)
+#   $6 = grant_execute (true/false)
+setup_user_internal() {
+    local users="$1"
+    local databases="$2"
+    local password="$3"
+    local grant_read="$4"
+    local grant_write="$5"
+    local grant_execute="$6"
 
     # 將逗號分隔的字串轉為陣列
     IFS=',' read -ra user_array <<< "$users"
@@ -325,16 +358,6 @@ cmd_setup_user() {
     [ "$grant_read" = true ] && echo "  - 讀取 (db_datareader)"
     [ "$grant_write" = true ] && echo "  - 寫入 (db_datawriter)"
     [ "$grant_execute" = true ] && echo "  - 執行預存程序 (EXECUTE)"
-    echo ""
-
-    # 確認操作
-    if ! confirm_action "確定要設定以上使用者並授予權限嗎？" "no"; then
-        show_warning "已取消操作"
-        exit 0
-    fi
-
-    echo ""
-    show_info "開始設定使用者..."
     echo ""
 
     # 處理每個使用者
@@ -412,6 +435,90 @@ cmd_setup_user() {
             done
         fi
     done
+}
+
+# 從檔案處理 setup-user
+# 參數：$1 = 檔案路徑
+cmd_setup_user_from_file() {
+    local file="$1"
+
+    show_info "從檔案讀取使用者設定: $file"
+    echo ""
+
+    # 解析檔案
+    local parsed_data
+    parsed_data=$(process_setup_user_from_file "$file")
+
+    if [ $? -ne 0 ] || [ -z "$parsed_data" ]; then
+        show_error "檔案解析失敗"
+        return 1
+    fi
+
+    local total_count=0
+    local success_count=0
+    local fail_count=0
+
+    # 顯示即將處理的使用者清單
+    echo -e "${CYAN}========================================${NC}"
+    echo -e "${CYAN}  即將處理的使用者清單${NC}"
+    echo -e "${CYAN}========================================${NC}"
+    while IFS='|' read -r username databases password grant_read grant_write grant_execute; do
+        total_count=$((total_count + 1))
+        echo "[$total_count] $username → $databases"
+    done <<< "$parsed_data"
+    echo ""
+
+    # 確認操作
+    if ! confirm_action "確定要處理以上 $total_count 個使用者嗎？" "no"; then
+        show_warning "已取消操作"
+        return 0
+    fi
+
+    echo ""
+    show_info "開始批次設定使用者..."
+    echo ""
+
+    # 處理每一筆資料
+    success_count=0
+    fail_count=0
+    local current=0
+
+    while IFS='|' read -r username databases password grant_read grant_write grant_execute; do
+        current=$((current + 1))
+
+        echo ""
+        echo -e "${YELLOW}========================================${NC}"
+        echo -e "${YELLOW}  處理 [$current/$total_count]: $username${NC}"
+        echo -e "${YELLOW}========================================${NC}"
+
+        # 呼叫內部處理函式
+        if setup_user_internal "$username" "$databases" "$password" "$grant_read" "$grant_write" "$grant_execute"; then
+            success_count=$((success_count + 1))
+        else
+            fail_count=$((fail_count + 1))
+        fi
+    done <<< "$parsed_data"
+
+    # 顯示最終摘要
+    echo ""
+    echo "========================================"
+    echo -e "${GREEN}批次處理完成${NC}"
+    echo "========================================"
+    echo "總計: $total_count"
+    echo -e "${GREEN}成功: $success_count${NC}"
+    if [ $fail_count -gt 0 ]; then
+        echo -e "${RED}失敗: $fail_count${NC}"
+    else
+        echo "失敗: $fail_count"
+    fi
+    echo "========================================"
+
+    # 如果有失敗，返回錯誤碼
+    if [ $fail_count -gt 0 ]; then
+        return 1
+    else
+        return 0
+    fi
 }
 
 # 授予權限
@@ -769,12 +876,18 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   --verbose                       詳細輸出
 
 設定使用者選項 (setup-user):
+  ${YELLOW}命令列模式：${NC}
   --users <user1,user2,...>       使用者名稱（逗號分隔支援多個）
   --databases <db1,db2,...>       資料庫名稱（逗號分隔支援多個）
   --password <password>           使用者密碼（建立新使用者時必填）
   --grant-read                    授予讀取權限 (db_datareader)
   --grant-write                   授予寫入權限 (db_datawriter)
   --grant-execute                 授予執行預存程序權限 (EXECUTE)
+
+  ${YELLOW}檔案模式：${NC}
+  --file <file>                   從檔案讀取使用者設定（支援 CSV 和 JSON 格式）
+                                  範本檔案：templates/setup-users.csv.example
+                                           templates/setup-users.json.example
 
 授予/撤銷權限選項:
   --server-role <role>            Server 層級角色（如: sysadmin）
@@ -787,6 +900,7 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   --users <user1,user2,...>       使用者清單（逗號分隔）
 
 範例:
+  ${CYAN}# 命令列模式${NC}
   # 設定使用者（單一使用者，單一資料庫）
   $0 setup-user --users app_user --databases MyAppDB --password 'StrongP@ss123' \\
     --grant-read --grant-write --grant-execute
@@ -806,6 +920,18 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   # 為現有使用者授予額外權限（不需要密碼）
   $0 setup-user --users existing_user --databases MyAppDB \\
     --grant-execute
+
+  ${CYAN}# 檔案模式（批次處理）${NC}
+  # 從 CSV 檔案批次建立使用者
+  $0 setup-user --file setup-users.csv
+
+  # 從 JSON 檔案批次建立使用者
+  $0 setup-user --file setup-users.json
+
+  # 準備範本檔案
+  cp templates/setup-users.csv.example my-users.csv
+  nano my-users.csv
+  $0 setup-user --file my-users.csv
 
   # 查詢使用者權限
   $0 get-user john --format table

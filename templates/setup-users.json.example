@@ -1,0 +1,49 @@
+{
+  "users": [
+    {
+      "username": "app_user",
+      "databases": ["ProductionDB", "StagingDB"],
+      "password": "StrongP@ss123!",
+      "grant_read": true,
+      "grant_write": true,
+      "grant_execute": true,
+      "comment": "應用程式使用者（完整權限）"
+    },
+    {
+      "username": "api_user",
+      "databases": ["ProductionDB", "StagingDB"],
+      "password": "ApiP@ss123!",
+      "grant_read": true,
+      "grant_write": true,
+      "grant_execute": false,
+      "comment": "API 使用者（讀寫權限）"
+    },
+    {
+      "username": "report_user",
+      "databases": ["ProductionDB", "StagingDB", "AnalyticsDB"],
+      "password": "ReportP@ss123!",
+      "grant_read": true,
+      "grant_write": false,
+      "grant_execute": false,
+      "comment": "報表使用者（唯讀權限）"
+    },
+    {
+      "username": "dev_user",
+      "databases": ["DevDB"],
+      "password": "DevP@ss123!",
+      "grant_read": true,
+      "grant_write": true,
+      "grant_execute": true,
+      "comment": "開發環境使用者"
+    },
+    {
+      "username": "test_user",
+      "databases": ["TestDB"],
+      "password": "TestP@ss123!",
+      "grant_read": true,
+      "grant_write": true,
+      "grant_execute": false,
+      "comment": "測試環境使用者"
+    }
+  ]
+}

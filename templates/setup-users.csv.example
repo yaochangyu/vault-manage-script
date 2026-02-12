@@ -1,0 +1,11 @@
+username,databases,password,grant_read,grant_write,grant_execute
+# 應用程式使用者（完整權限）
+app_user,"ProductionDB,StagingDB",StrongP@ss123!,true,true,true
+# API 使用者（讀寫權限）
+api_user,"ProductionDB,StagingDB",ApiP@ss123!,true,true,false
+# 報表使用者（唯讀權限）
+report_user,"ProductionDB,StagingDB,AnalyticsDB",ReportP@ss123!,true,false,false
+# 開發環境使用者
+dev_user,DevDB,DevP@ss123!,true,true,true
+# 測試環境使用者
+test_user,TestDB,TestP@ss123!,true,true,false

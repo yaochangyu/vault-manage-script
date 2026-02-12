@@ -276,6 +276,124 @@ process_batch_from_file() {
     process_batch "$parsed_data"
 }
 
+#=============================================================================
+# setup-user 專用解析函式
+#=============================================================================
+
+# 解析 setup-user CSV 格式
+# CSV 格式：username,databases,password,grant_read,grant_write,grant_execute
+# 範例：app_user,"DB1,DB2",StrongPass123!,true,true,true
+parse_setup_user_csv() {
+    local csv_file="$1"
+
+    if ! validate_file_exists "$csv_file"; then
+        return 1
+    fi
+
+    show_debug "解析 setup-user CSV 檔案: $csv_file"
+
+    # 讀取 CSV 檔案（跳過標題行）
+    local line_number=0
+    while IFS=, read -r username databases password grant_read grant_write grant_execute; do
+        line_number=$((line_number + 1))
+
+        # 跳過標題行
+        if [ $line_number -eq 1 ]; then
+            continue
+        fi
+
+        # 跳過空行
+        if [ -z "$username" ]; then
+            continue
+        fi
+
+        # 跳過註解行
+        if [[ "$username" =~ ^# ]]; then
+            continue
+        fi
+
+        # 去除引號（處理 "DB1,DB2" 這類欄位）
+        databases=$(echo "$databases" | sed 's/^"//;s/"$//')
+        password=$(echo "$password" | sed 's/^"//;s/"$//')
+
+        # 輸出解析結果（使用特殊分隔符）
+        echo "${username}|${databases}|${password}|${grant_read}|${grant_write}|${grant_execute}"
+    done < "$csv_file"
+}
+
+# 解析 setup-user JSON 格式
+# JSON 格式範例：
+# {
+#   "users": [
+#     {
+#       "username": "app_user",
+#       "databases": ["DB1", "DB2"],
+#       "password": "StrongPass123!",
+#       "grant_read": true,
+#       "grant_write": true,
+#       "grant_execute": true
+#     }
+#   ]
+# }
+parse_setup_user_json() {
+    local json_file="$1"
+
+    if ! validate_file_exists "$json_file"; then
+        return 1
+    fi
+
+    show_debug "解析 setup-user JSON 檔案: $json_file"
+
+    # 檢查 jq 是否安裝
+    if ! command -v jq &> /dev/null; then
+        show_error "jq 未安裝，無法解析 JSON 檔案"
+        echo "請安裝 jq："
+        echo "  Ubuntu/Debian: sudo apt-get install jq"
+        echo "  macOS: brew install jq"
+        return 1
+    fi
+
+    # 使用 jq 解析 JSON
+    jq -r '.users[] |
+        "\(.username)|\(.databases | join(","))|\(.password)|\(.grant_read)|\(.grant_write)|\(.grant_execute)"' "$json_file"
+}
+
+# 從檔案處理 setup-user
+# 參數：$1 = 檔案路徑
+process_setup_user_from_file() {
+    local file="$1"
+
+    if ! validate_file_exists "$file"; then
+        return 1
+    fi
+
+    # 根據檔案副檔名判斷格式
+    local file_ext="${file##*.}"
+    local parsed_data
+
+    case "$file_ext" in
+        csv)
+            show_info "檢測到 CSV 格式"
+            parsed_data=$(parse_setup_user_csv "$file")
+            ;;
+        json)
+            show_info "檢測到 JSON 格式"
+            parsed_data=$(parse_setup_user_json "$file")
+            ;;
+        *)
+            show_error "不支援的檔案格式: $file_ext（僅支援 csv 和 json）"
+            return 1
+            ;;
+    esac
+
+    if [ -z "$parsed_data" ]; then
+        show_error "檔案解析失敗或檔案為空"
+        return 1
+    fi
+
+    echo "$parsed_data"
+}
+
 # 從命令列參數批次處理
 # 參數：
 #   --users <user1,user2,...>
