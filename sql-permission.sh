@@ -37,9 +37,12 @@ NC='\033[0m' # No Color
 # 函數：檢查並安裝依賴工具
 #=============================================================================
 check_and_install_dependencies() {
+    # 先將 mssql-tools 加入 PATH（如果還沒加入的話）
+    export PATH="$PATH:/opt/mssql-tools18/bin:/opt/mssql-tools/bin"
+
     local missing_tools=()
 
-    # 檢查 sqlcmd
+    # 檢查 sqlcmd（使用 command -v 判斷）
     if ! command -v sqlcmd &> /dev/null; then
         missing_tools+=("sqlcmd")
     fi
@@ -60,12 +63,18 @@ check_and_install_dependencies() {
         # 檢查是否有安裝腳本
         if [ -f "${SCRIPT_DIR}/install-tools.sh" ]; then
             echo -e "${BLUE}是否要自動安裝依賴工具？${NC}"
-            read -p "請選擇 (y/n): " install_confirm
+            read -p "請選擇 (y/n) [預設: y]: " install_confirm
+
+            # 如果為空（直接按 Enter），預設為 y
+            install_confirm="${install_confirm:-y}"
 
             if [[ "$install_confirm" =~ ^[Yy]$ ]]; then
                 echo ""
                 echo -e "${GREEN}執行自動安裝...${NC}"
                 "${SCRIPT_DIR}/install-tools.sh"
+
+                # 立即更新當前 shell 的 PATH（安裝完成後）
+                export PATH="$PATH:/opt/mssql-tools/bin:/opt/mssql-tools18/bin"
 
                 # 重新檢查
                 if command -v sqlcmd &> /dev/null; then
@@ -76,6 +85,9 @@ check_and_install_dependencies() {
                 else
                     echo ""
                     echo -e "${RED}安裝失敗，請手動安裝依賴工具${NC}"
+                    echo -e "${YELLOW}提示：請執行以下命令後重試${NC}"
+                    echo "  export PATH=\"\$PATH:/opt/mssql-tools/bin:/opt/mssql-tools18/bin\""
+                    echo "  或重新載入 shell: source ~/.bashrc"
                     exit 1
                 fi
             else

@@ -71,39 +71,74 @@ detect_distro() {
     show_info "偵測到的系統: $DISTRO $VERSION"
 }
 
-# 安裝 sqlcmd (Ubuntu/Debian)
+# 安裝 sqlcmd (Ubuntu/Debian) - 使用 APT 儲存庫方式
 install_ubuntu_debian() {
     if [ "$INSTALL_SQLCMD" = true ]; then
         show_info "開始在 Ubuntu/Debian 上安裝 sqlcmd..."
 
-        # 1. 匯入 Microsoft GPG 金鑰
+        # 1. 安裝依賴套件
+        show_info "安裝依賴套件..."
+        sudo apt-get update -qq
+        sudo apt-get install -y curl gnupg apt-transport-https
+
+        # 2. 匯入 Microsoft GPG 金鑰
         show_info "匯入 Microsoft GPG 金鑰..."
-        curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc > /dev/null
+        sudo mkdir -p /usr/share/keyrings
 
-        # 2. 註冊 Microsoft Ubuntu 儲存庫
-        show_info "註冊 Microsoft Ubuntu 儲存庫..."
-
-        # 偵測 Ubuntu 版本
-        if [ "$DISTRO" = "ubuntu" ]; then
-            UBUNTU_VERSION=$(lsb_release -rs)
-            curl -sSL https://packages.microsoft.com/config/ubuntu/${UBUNTU_VERSION}/prod.list | \
-                sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
-        elif [ "$DISTRO" = "debian" ]; then
-            # Debian
-            DEBIAN_VERSION=$(cat /etc/debian_version | cut -d. -f1)
-            curl -sSL https://packages.microsoft.com/config/debian/${DEBIAN_VERSION}/prod.list | \
-                sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+        # 檢查金鑰檔案是否已存在
+        if [ -f /usr/share/keyrings/microsoft-prod.gpg ]; then
+            show_info "GPG 金鑰已存在，跳過下載"
+        else
+            curl -sSL https://packages.microsoft.com/keys/microsoft.asc | \
+                sudo gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+            show_success "GPG 金鑰匯入完成"
         fi
 
-        # 3. 更新套件清單
+        # 3. 註冊 Microsoft 儲存庫
+        if [ -f /etc/apt/sources.list.d/mssql-release.list ]; then
+            show_info "Microsoft 儲存庫已存在，跳過設定"
+        else
+            show_info "註冊 Microsoft 儲存庫..."
+
+            if [ "$DISTRO" = "ubuntu" ]; then
+                UBUNTU_VERSION=$(lsb_release -rs)
+
+                # Ubuntu 24.04 還不受官方支援，使用 22.04 儲存庫
+                if [ "$UBUNTU_VERSION" = "24.04" ]; then
+                    show_warning "Ubuntu 24.04 尚未被官方支援，將使用 Ubuntu 22.04 的套件"
+                    UBUNTU_VERSION="22.04"
+                fi
+
+                # 建立 sources.list
+                echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${UBUNTU_VERSION}/prod $(lsb_release -cs) main" | \
+                    sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+
+            elif [ "$DISTRO" = "debian" ]; then
+                DEBIAN_VERSION=$(cat /etc/debian_version | cut -d. -f1)
+
+                echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/${DEBIAN_VERSION}/prod $(lsb_release -cs) main" | \
+                    sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+            fi
+
+            show_success "儲存庫設定完成"
+        fi
+
+        # 4. 更新套件清單
         show_info "更新套件清單..."
-        sudo apt-get update -qq
+        sudo apt-get update
 
-        # 4. 安裝 mssql-tools（包含 sqlcmd）
+        # 5. 安裝 mssql-tools 和 unixODBC
         show_info "安裝 mssql-tools 和 unixodbc-dev..."
-        sudo ACCEPT_EULA=Y apt-get install -y mssql-tools unixodbc-dev
 
-        show_success "mssql-tools 安裝完成"
+        # 嘗試安裝 mssql-tools18（新版）
+        if sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev 2>/dev/null; then
+            show_success "mssql-tools18 安裝完成"
+        else
+            # 如果失敗，嘗試安裝 mssql-tools（舊版）
+            show_warning "mssql-tools18 安裝失敗，嘗試安裝 mssql-tools..."
+            sudo ACCEPT_EULA=Y apt-get install -y mssql-tools unixodbc-dev
+            show_success "mssql-tools 安裝完成"
+        fi
     fi
 
     # 安裝 jq
@@ -162,18 +197,40 @@ setup_path() {
         shell_rc="$HOME/.profile"
     fi
 
-    # 檢查 PATH 是否已經包含 sqlcmd
-    if ! grep -q "/opt/mssql-tools/bin" "$shell_rc" 2>/dev/null; then
-        echo '' >> "$shell_rc"
-        echo '# Add sqlcmd to PATH' >> "$shell_rc"
-        echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> "$shell_rc"
+    # 檢查 PATH 是否已經包含 sqlcmd（支援兩個版本）
+    local path_updated=false
+
+    # 檢查 mssql-tools18
+    if [ -d "/opt/mssql-tools18/bin" ]; then
+        if ! grep -q "/opt/mssql-tools18/bin" "$shell_rc" 2>/dev/null; then
+            echo '' >> "$shell_rc"
+            echo '# Add sqlcmd to PATH' >> "$shell_rc"
+            echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> "$shell_rc"
+            path_updated=true
+        fi
+        # 立即套用到當前 session
+        export PATH="$PATH:/opt/mssql-tools18/bin"
+    fi
+
+    # 檢查 mssql-tools（舊版）
+    if [ -d "/opt/mssql-tools/bin" ]; then
+        if ! grep -q "/opt/mssql-tools/bin" "$shell_rc" 2>/dev/null; then
+            if [ "$path_updated" = false ]; then
+                echo '' >> "$shell_rc"
+                echo '# Add sqlcmd to PATH' >> "$shell_rc"
+            fi
+            echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> "$shell_rc"
+            path_updated=true
+        fi
+        # 立即套用到當前 session
+        export PATH="$PATH:/opt/mssql-tools/bin"
+    fi
+
+    if [ "$path_updated" = true ]; then
         show_success "已將 sqlcmd 加入 PATH（檔案: $shell_rc）"
     else
         show_info "PATH 已包含 sqlcmd"
     fi
-
-    # 立即套用到當前 session
-    export PATH="$PATH:/opt/mssql-tools/bin"
 }
 
 # 驗證安裝
