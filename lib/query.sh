@@ -275,6 +275,134 @@ get_user_permissions_full() {
 }
 
 #=============================================================================
+# 使用者管理函式
+#=============================================================================
+
+# 建立 Login（Server 層級）
+# 參數：
+#   $1 = 使用者名稱
+#   $2 = 密碼
+create_login() {
+    local username="$1"
+    local password="$2"
+
+    if ! validate_username "$username"; then
+        return 1
+    fi
+
+    if [ -z "$password" ]; then
+        show_error "密碼不可為空"
+        return 1
+    fi
+
+    show_debug "建立 Login: $username"
+
+    # 檢查 Login 是否已存在
+    if user_exists_server "$username"; then
+        show_warning "Login '$username' 已存在，跳過建立"
+        return 0
+    fi
+
+    # 寫入稽核日誌（不記錄密碼）
+    write_audit_log "create_login" "$username" "action=create_login"
+
+    local sql="
+    CREATE LOGIN [$username] WITH PASSWORD = '$password';
+    PRINT '已建立 Login: $username';
+    "
+
+    if execute_sql_quiet "master" "$sql"; then
+        show_success "已建立 Login: $username"
+        return 0
+    else
+        show_error "建立 Login 失敗"
+        return 1
+    fi
+}
+
+# 建立 User（Database 層級）
+# 參數：
+#   $1 = 使用者名稱
+#   $2 = 資料庫名稱
+create_user() {
+    local username="$1"
+    local database="$2"
+
+    if ! validate_username "$username"; then
+        return 1
+    fi
+
+    if ! validate_database "$database"; then
+        return 1
+    fi
+
+    # 檢查資料庫是否存在
+    if ! database_exists "$database"; then
+        show_error "資料庫 '$database' 不存在"
+        return 1
+    fi
+
+    show_debug "在資料庫 '$database' 建立 User: $username"
+
+    # 檢查 User 是否已存在
+    if user_exists_database "$username" "$database"; then
+        show_warning "User '$username' 在資料庫 '$database' 已存在，跳過建立"
+        return 0
+    fi
+
+    # 寫入稽核日誌
+    write_audit_log "create_user" "$username" "database=$database, action=create_user"
+
+    local sql="
+    CREATE USER [$username] FOR LOGIN [$username];
+    PRINT '已建立 User: $username';
+    "
+
+    if execute_sql_quiet "$database" "$sql"; then
+        show_success "已在資料庫 '$database' 建立 User: $username"
+        return 0
+    else
+        show_error "建立 User 失敗"
+        return 1
+    fi
+}
+
+# 授予 EXECUTE 權限（整個資料庫層級）
+# 參數：
+#   $1 = 使用者名稱
+#   $2 = 資料庫名稱
+grant_execute_permission() {
+    local username="$1"
+    local database="$2"
+
+    if ! validate_username "$username"; then
+        return 1
+    fi
+
+    if ! validate_database "$database"; then
+        return 1
+    fi
+
+    show_debug "授予使用者 '$username' 在資料庫 '$database' 的 EXECUTE 權限"
+
+    # 寫入稽核日誌
+    write_audit_log "grant_execute_permission" "$username" "database=$database, permission=EXECUTE"
+
+    local sql="
+    GRANT EXECUTE TO [$username];
+    PRINT '已授予 EXECUTE 權限';
+    "
+
+    if execute_sql_quiet "$database" "$sql"; then
+        show_success "已授予 EXECUTE 權限給使用者 '$username' (資料庫: $database)"
+        return 0
+    else
+        show_error "授予 EXECUTE 權限失敗"
+        return 1
+    fi
+}
+
+#=============================================================================
 # 權限設定函式
 #=============================================================================
 

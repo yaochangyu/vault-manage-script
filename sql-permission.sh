@@ -251,6 +251,169 @@ cmd_get_all() {
     esac
 }
 
+# 建立使用者
+cmd_create_user() {
+    # 解析選項
+    local users=""
+    local databases=""
+    local password=""
+    local grant_read=false
+    local grant_write=false
+    local grant_execute=false
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --users)
+                users="$2"
+                shift 2
+                ;;
+            --databases)
+                databases="$2"
+                shift 2
+                ;;
+            --password)
+                password="$2"
+                shift 2
+                ;;
+            --grant-read)
+                grant_read=true
+                shift
+                ;;
+            --grant-write)
+                grant_write=true
+                shift
+                ;;
+            --grant-execute)
+                grant_execute=true
+                shift
+                ;;
+            *)
+                show_error "未知的選項: $1"
+                exit 1
+                ;;
+        esac
+    done
+
+    # 驗證必要參數
+    if [ -z "$users" ]; then
+        show_error "請使用 --users 指定使用者名稱（可用逗號分隔多個使用者）"
+        exit 1
+    fi
+
+    if [ -z "$databases" ]; then
+        show_error "請使用 --databases 指定資料庫名稱（可用逗號分隔多個資料庫）"
+        exit 1
+    fi
+
+    if [ -z "$password" ]; then
+        show_error "請使用 --password 指定密碼"
+        exit 1
+    fi
+
+    # 將逗號分隔的字串轉為陣列
+    IFS=',' read -ra user_array <<< "$users"
+    IFS=',' read -ra db_array <<< "$databases"
+
+    # 顯示操作摘要
+    echo ""
+    echo -e "${CYAN}========================================${NC}"
+    echo -e "${CYAN}  建立使用者與授予權限${NC}"
+    echo -e "${CYAN}========================================${NC}"
+    echo "使用者: ${user_array[*]}"
+    echo "資料庫: ${db_array[*]}"
+    echo "權限:"
+    [ "$grant_read" = true ] && echo "  - 讀取 (db_datareader)"
+    [ "$grant_write" = true ] && echo "  - 寫入 (db_datawriter)"
+    [ "$grant_execute" = true ] && echo "  - 執行預存程序 (EXECUTE)"
+    echo ""
+
+    # 確認操作
+    if ! confirm_action "確定要建立以上使用者並授予權限嗎？" "no"; then
+        show_warning "已取消操作"
+        exit 0
+    fi
+
+    echo ""
+    show_info "開始建立使用者..."
+    echo ""
+
+    # 處理每個使用者
+    for user in "${user_array[@]}"; do
+        user=$(echo "$user" | xargs)  # 去除空白
+
+        if [ -z "$user" ]; then
+            continue
+        fi
+
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${BLUE}處理使用者: $user${NC}"
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+
+        # 1. 建立 Login（Server 層級）
+        if ! create_login "$user" "$password"; then
+            show_error "建立 Login 失敗，跳過此使用者"
+            continue
+        fi
+
+        # 2. 在每個資料庫建立 User 並授予權限
+        for db in "${db_array[@]}"; do
+            db=$(echo "$db" | xargs)  # 去除空白
+
+            if [ -z "$db" ]; then
+                continue
+            fi
+
+            echo ""
+            echo -e "${CYAN}資料庫: $db${NC}"
+
+            # 建立 User（Database 層級）
+            if ! create_user "$user" "$db"; then
+                show_warning "建立 User 失敗，跳過此資料庫"
+                continue
+            fi
+
+            # 授予讀取權限
+            if [ "$grant_read" = true ]; then
+                grant_database_role "$user" "$db" "db_datareader"
+            fi
+
+            # 授予寫入權限
+            if [ "$grant_write" = true ]; then
+                grant_database_role "$user" "$db" "db_datawriter"
+            fi
+
+            # 授予執行權限
+            if [ "$grant_execute" = true ]; then
+                grant_execute_permission "$user" "$db"
+            fi
+        done
+
+        echo ""
+    done
+
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}  使用者建立完成！${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo ""
+
+    # 顯示建立的使用者權限
+    for user in "${user_array[@]}"; do
+        user=$(echo "$user" | xargs)
+        if [ -n "$user" ]; then
+            echo -e "${BLUE}使用者 '$user' 的權限：${NC}"
+            for db in "${db_array[@]}"; do
+                db=$(echo "$db" | xargs)
+                if [ -n "$db" ]; then
+                    format_user_permissions_table "$user" "$db"
+                    echo ""
+                fi
+            done
+        fi
+    done
+}
+
 # 授予權限
 cmd_grant() {
     local username="$1"
@@ -572,6 +735,9 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   $0 <command> [options]
 
 命令:
+  ${CYAN}使用者管理${NC}
+    create-user [options]         建立使用者並授予權限（支援多個使用者和資料庫）
+
   ${CYAN}查詢權限${NC}
     get-user <username>           查詢特定使用者的權限
     get-all                       查詢所有使用者的權限
@@ -601,6 +767,14 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   --dry-run                       預覽變更但不執行
   --verbose                       詳細輸出
 
+建立使用者選項:
+  --users <user1,user2,...>       使用者名稱（逗號分隔支援多個）
+  --databases <db1,db2,...>       資料庫名稱（逗號分隔支援多個）
+  --password <password>           使用者密碼
+  --grant-read                    授予讀取權限 (db_datareader)
+  --grant-write                   授予寫入權限 (db_datawriter)
+  --grant-execute                 授予執行預存程序權限 (EXECUTE)
+
 授予/撤銷權限選項:
   --server-role <role>            Server 層級角色（如: sysadmin）
   --db-role <role>                Database 層級角色（如: db_datareader）
@@ -612,6 +786,22 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   --users <user1,user2,...>       使用者清單（逗號分隔）
 
 範例:
+  # 建立使用者（單一使用者，單一資料庫）
+  $0 create-user --users app_user --databases MyAppDB --password 'StrongP@ss123' \\
+    --grant-read --grant-write --grant-execute
+
+  # 建立使用者（單一使用者，多個資料庫）
+  $0 create-user --users app_user --databases "DB1,DB2,DB3" --password 'StrongP@ss123' \\
+    --grant-read --grant-write --grant-execute
+
+  # 建立使用者（多個使用者，單一資料庫）
+  $0 create-user --users "user1,user2,user3" --databases MyAppDB --password 'StrongP@ss123' \\
+    --grant-read --grant-write
+
+  # 建立使用者（多個使用者，多個資料庫）
+  $0 create-user --users "user1,user2" --databases "DB1,DB2" --password 'StrongP@ss123' \\
+    --grant-read --grant-write --grant-execute
+
   # 查詢使用者權限
   $0 get-user john --format table
   $0 get-user john --database MyDB --format json
@@ -668,6 +858,9 @@ main() {
 
     # 執行命令
     case $command in
+        create-user)
+            cmd_create_user "$@"
+            ;;
         get-user)
             cmd_get_user "$@"
             ;;
