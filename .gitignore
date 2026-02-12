@@ -1,0 +1,29 @@
+# 環境變數檔案（包含機敏資料）
+.env
+
+# Vault token 暫存檔
+.vault-token
+
+# 備份檔案
+*.bak
+*.backup
+*~
+
+# 日誌檔案
+*.log
+
+# 作業系統產生的檔案
+.DS_Store
+Thumbs.db
+
+# 編輯器產生的檔案
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 測試產生的臨時檔案
+test_*.sh
+tmp/
+temp/
