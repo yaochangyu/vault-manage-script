@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: sqlserver-2019
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "YourStrongPassword!" # 請務必更換為您自己的強密碼
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - ./data/sqlserver:/var/opt/mssql # 持久化 SQL Server 資料
+    restart: unless-stopped
+
+  vault:
+    image: hashicorp/vault
+    container_name: vault-server
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: "myroot" # 開發模式下的 Root Token ID，請務必更換
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200" # 開發模式下的監聽位址
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK # Vault 需要 IPC_LOCK 功能
+    restart: unless-stopped
