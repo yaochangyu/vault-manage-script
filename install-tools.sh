@@ -102,21 +102,24 @@ install_ubuntu_debian() {
 
             if [ "$DISTRO" = "ubuntu" ]; then
                 UBUNTU_VERSION=$(lsb_release -rs)
+                local CODENAME=$(lsb_release -cs)
 
                 # Ubuntu 24.04 還不受官方支援，使用 22.04 儲存庫
                 if [ "$UBUNTU_VERSION" = "24.04" ]; then
                     show_warning "Ubuntu 24.04 尚未被官方支援，將使用 Ubuntu 22.04 的套件"
                     UBUNTU_VERSION="22.04"
+                    CODENAME="jammy"  # Ubuntu 22.04 的代號
                 fi
 
                 # 建立 sources.list
-                echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${UBUNTU_VERSION}/prod $(lsb_release -cs) main" | \
+                echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${UBUNTU_VERSION}/prod ${CODENAME} main" | \
                     sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
 
             elif [ "$DISTRO" = "debian" ]; then
                 DEBIAN_VERSION=$(cat /etc/debian_version | cut -d. -f1)
+                local CODENAME=$(lsb_release -cs)
 
-                echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/${DEBIAN_VERSION}/prod $(lsb_release -cs) main" | \
+                echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/${DEBIAN_VERSION}/prod ${CODENAME} main" | \
                     sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
             fi
 
