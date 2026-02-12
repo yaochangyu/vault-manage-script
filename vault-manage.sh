@@ -29,8 +29,8 @@ VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-false}"
 VAULT_USERNAME="${VAULT_USERNAME:-}"
 VAULT_PASSWORD="${VAULT_PASSWORD:-}"
 
-# Vault Token（認證後取得）
-VAULT_TOKEN=""
+# Vault Token（可直接從環境變數讀取或認證後取得）
+VAULT_TOKEN="${VAULT_TOKEN:-}"
 
 # 預設值
 DEFAULT_MOUNT="secret"
@@ -225,6 +225,612 @@ ensure_logged_in() {
     if [[ -z "$VAULT_TOKEN" ]]; then
         vault_login || return 1
     fi
+    return 0
+}
+
+#############################################################################
+# Vault Auth Method 管理函式
+#############################################################################
+
+# 啟用 userpass 認證方法
+vault_enable_userpass() {
+    # 確保已登入
+    ensure_logged_in || return 1
+
+    info "正在檢查 userpass 認證方法狀態..."
+
+    # 檢查 userpass 是否已啟用
+    local curl_opts
+    curl_opts=$(get_curl_opts)
+
+    local response
+    response=$(curl $curl_opts -w "\n%{http_code}" \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        "${VAULT_ADDR}/v1/sys/auth")
+
+    local http_body
+    local http_code
+    http_body=$(echo "$response" | sed -e '$d')
+    http_code=$(echo "$response" | tail -n 1)
+
+    if [[ "$http_code" != "200" ]]; then
+        error "無法檢查認證方法狀態（HTTP $http_code）"
+        return 1
+    fi
+
+    # 檢查 userpass/ 是否存在
+    local userpass_enabled
+    userpass_enabled=$(echo "$http_body" | jq -r '.data | has("userpass/")')
+
+    if [[ "$userpass_enabled" == "true" ]]; then
+        success "userpass 認證方法已啟用"
+        return 0
+    fi
+
+    # 啟用 userpass
+    info "正在啟用 userpass 認證方法..."
+
+    local enable_payload
+    enable_payload=$(jq -n '{type: "userpass"}')
+
+    response=$(curl $curl_opts -w "\n%{http_code}" \
+        -X POST \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$enable_payload" \
+        "${VAULT_ADDR}/v1/sys/auth/userpass")
+
+    http_body=$(echo "$response" | sed -e '$d')
+    http_code=$(echo "$response" | tail -n 1)
+
+    if [[ "$http_code" != "204" ]]; then
+        error "啟用 userpass 失敗（HTTP $http_code）"
+
+        local error_msg
+        error_msg=$(echo "$http_body" | jq -r '.errors[]?' 2>/dev/null || echo "")
+
+        if [[ -n "$error_msg" ]]; then
+            error "錯誤詳情：$error_msg"
+        fi
+
+        return 1
+    fi
+
+    success "userpass 認證方法已成功啟用"
+    return 0
+}
+
+#############################################################################
+# Vault Policy 管理函式
+#############################################################################
+
+# 建立 Policy
+vault_create_policy() {
+    local policy_name="$1"
+    local path="$2"
+    local capabilities="${3:-create,read,update,delete,list}"
+
+    # 確保已登入
+    ensure_logged_in || return 1
+
+    info "正在建立 policy: $policy_name"
+
+    # 將 capabilities 字串轉換為陣列格式
+    local caps_array
+    caps_array=$(echo "$capabilities" | sed 's/,/","/g')
+    caps_array="[\"$caps_array\"]"
+
+    # 建立 policy 內容（KV v2 需要 /data/ 和 /metadata/ 路徑）
+    local policy_content
+    policy_content=$(cat <<EOF
+# Policy for $path
+path "$path/data/*" {
+  capabilities = $caps_array
+}
+
+path "$path/metadata/*" {
+  capabilities = ["list", "read"]
+}
+EOF
+)
+
+    # 準備 API payload
+    local payload
+    payload=$(jq -n --arg policy "$policy_content" '{policy: $policy}')
+
+    # 發送請求
+    local curl_opts
+    curl_opts=$(get_curl_opts)
+
+    local response
+    response=$(curl $curl_opts -w "\n%{http_code}" \
+        -X PUT \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$payload" \
+        "${VAULT_ADDR}/v1/sys/policies/acl/${policy_name}")
+
+    local http_body
+    local http_code
+    http_body=$(echo "$response" | sed -e '$d')
+    http_code=$(echo "$response" | tail -n 1)
+
+    if [[ "$http_code" != "204" ]]; then
+        error "建立 policy 失敗（HTTP $http_code）"
+
+        local error_msg
+        error_msg=$(echo "$http_body" | jq -r '.errors[]?' 2>/dev/null || echo "")
+
+        if [[ -n "$error_msg" ]]; then
+            error "錯誤詳情：$error_msg"
+        fi
+
+        return 1
+    fi
+
+    success "Policy 建立成功：$policy_name"
+    return 0
+}
+
+#############################################################################
+# Vault User 管理函式
+#############################################################################
+
+# 建立 userpass 使用者
+vault_create_user() {
+    local username="$1"
+    local password="$2"
+    local custom_path="${3:-}"
+
+    # 確保已登入
+    ensure_logged_in || return 1
+
+    # 驗證密碼強度
+    if [[ ${#password} -lt 8 ]]; then
+        error "密碼長度至少需要 8 個字元"
+        return 1
+    fi
+
+    # 確保 userpass 已啟用
+    vault_enable_userpass || return 1
+
+    info "正在建立使用者：$username"
+
+    # 準備使用者路徑
+    local user_path
+    if [[ -n "$custom_path" ]]; then
+        user_path="$custom_path"
+    else
+        user_path="secret/user/${username}"
+    fi
+
+    # 建立 policy
+    local policy_name="user-${username}"
+    vault_create_policy "$policy_name" "$user_path" "create,read,update,delete,list" || return 1
+
+    # 建立 userpass 使用者
+    local user_payload
+    user_payload=$(jq -n \
+        --arg password "$password" \
+        --arg policies "$policy_name" \
+        '{password: $password, policies: $policies}')
+
+    local curl_opts
+    curl_opts=$(get_curl_opts)
+
+    local response
+    response=$(curl $curl_opts -w "\n%{http_code}" \
+        -X POST \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$user_payload" \
+        "${VAULT_ADDR}/v1/auth/userpass/users/${username}")
+
+    local http_body
+    local http_code
+    http_body=$(echo "$response" | sed -e '$d')
+    http_code=$(echo "$response" | tail -n 1)
+
+    if [[ "$http_code" != "204" ]]; then
+        error "建立使用者失敗（HTTP $http_code）"
+
+        local error_msg
+        error_msg=$(echo "$http_body" | jq -r '.errors[]?' 2>/dev/null || echo "")
+
+        if [[ -n "$error_msg" ]]; then
+            error "錯誤詳情：$error_msg"
+        fi
+
+        return 1
+    fi
+
+    # 建立使用者專屬 secret path（初始化）
+    info "正在初始化使用者 secret path：$user_path"
+
+    local init_payload
+    init_payload=$(jq -n '{data: {".initialized": "true", "created_at": (now | strftime("%Y-%m-%d %H:%M:%S"))}}')
+
+    # 取得 mount 和相對路徑
+    local mount path_part
+    if [[ "$user_path" =~ ^([^/]+)/(.+)$ ]]; then
+        mount="${BASH_REMATCH[1]}"
+        path_part="${BASH_REMATCH[2]}/.vault-init"
+    else
+        mount="$user_path"
+        path_part=".vault-init"
+    fi
+
+    response=$(curl $curl_opts -w "\n%{http_code}" \
+        -X POST \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$init_payload" \
+        "${VAULT_ADDR}/v1/${mount}/data/${path_part}")
+
+    http_code=$(echo "$response" | tail -n 1)
+
+    if [[ "$http_code" != "200" && "$http_code" != "204" ]]; then
+        warning "初始化 secret path 失敗，但使用者已建立"
+    fi
+
+    success "使用者建立成功：$username"
+    info "Policy：$policy_name"
+    info "Secret Path：$user_path"
+    return 0
+}
+
+# 列出所有 userpass 使用者
+vault_list_users() {
+    # 確保已登入
+    ensure_logged_in || return 1
+
+    info "正在列出 userpass 使用者..."
+
+    local curl_opts
+    curl_opts=$(get_curl_opts)
+
+    local response
+    response=$(curl $curl_opts -w "\n%{http_code}" \
+        -X LIST \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        "${VAULT_ADDR}/v1/auth/userpass/users")
+
+    local http_body
+    local http_code
+    http_body=$(echo "$response" | sed -e '$d')
+    http_code=$(echo "$response" | tail -n 1)
+
+    if [[ "$http_code" != "200" ]]; then
+        if [[ "$http_code" == "404" ]]; then
+            warning "userpass 認證方法未啟用或沒有使用者"
+            return 0
+        else
+            error "列出使用者失敗（HTTP $http_code）"
+
+            local error_msg
+            error_msg=$(echo "$http_body" | jq -r '.errors[]?' 2>/dev/null || echo "")
+
+            if [[ -n "$error_msg" ]]; then
+                error "錯誤詳情：$error_msg"
+            fi
+        fi
+
+        return 1
+    fi
+
+    local users
+    users=$(echo "$http_body" | jq -r '.data.keys[]?' 2>/dev/null)
+
+    if [[ -z "$users" ]]; then
+        warning "沒有找到任何使用者"
+        return 0
+    fi
+
+    echo ""
+    echo "Userpass 使用者列表："
+    echo "---"
+    echo "$users" | while IFS= read -r user; do
+        echo "  👤 $user"
+    done
+    echo ""
+
+    success "列出成功"
+    return 0
+}
+
+# 刪除 userpass 使用者
+vault_delete_user() {
+    local username="$1"
+    local keep_secrets="${2:-false}"
+
+    # 確保已登入
+    ensure_logged_in || return 1
+
+    warning "即將刪除使用者：$username"
+
+    # 要求確認
+    read -p "確定要刪除嗎？(y/N): " -n 1 -r
+    echo
+
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        info "取消刪除操作"
+        return 0
+    fi
+
+    info "正在刪除使用者：$username"
+
+    # 刪除 userpass 使用者
+    local curl_opts
+    curl_opts=$(get_curl_opts)
+
+    local response
+    response=$(curl $curl_opts -w "\n%{http_code}" \
+        -X DELETE \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        "${VAULT_ADDR}/v1/auth/userpass/users/${username}")
+
+    local http_body
+    local http_code
+    http_body=$(echo "$response" | sed -e '$d')
+    http_code=$(echo "$response" | tail -n 1)
+
+    if [[ "$http_code" != "204" ]]; then
+        if [[ "$http_code" == "404" ]]; then
+            error "使用者不存在：$username"
+        else
+            error "刪除使用者失敗（HTTP $http_code）"
+
+            local error_msg
+            error_msg=$(echo "$http_body" | jq -r '.errors[]?' 2>/dev/null || echo "")
+
+            if [[ -n "$error_msg" ]]; then
+                error "錯誤詳情：$error_msg"
+            fi
+        fi
+
+        return 1
+    fi
+
+    success "使用者已刪除：$username"
+
+    # 刪除對應的 policy
+    local policy_name="user-${username}"
+    info "正在刪除 policy：$policy_name"
+
+    response=$(curl $curl_opts -w "\n%{http_code}" \
+        -X DELETE \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        "${VAULT_ADDR}/v1/sys/policies/acl/${policy_name}")
+
+    http_code=$(echo "$response" | tail -n 1)
+
+    if [[ "$http_code" == "204" ]]; then
+        success "Policy 已刪除：$policy_name"
+    else
+        warning "Policy 刪除失敗或不存在：$policy_name"
+    fi
+
+    # 詢問是否刪除 secrets
+    if [[ "$keep_secrets" != "true" ]]; then
+        echo ""
+        read -p "是否同時刪除使用者的 secrets？(y/N): " -n 1 -r
+        echo
+
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            local user_path="secret/user/${username}"
+            info "正在刪除 secrets：$user_path"
+
+            response=$(curl $curl_opts -w "\n%{http_code}" \
+                -X DELETE \
+                -H "X-Vault-Token: $VAULT_TOKEN" \
+                "${VAULT_ADDR}/v1/secret/metadata/user/${username}")
+
+            http_code=$(echo "$response" | tail -n 1)
+
+            if [[ "$http_code" == "204" ]]; then
+                success "Secrets 已刪除：$user_path"
+            else
+                warning "Secrets 刪除失敗或不存在"
+            fi
+        else
+            info "保留使用者的 secrets"
+        fi
+    fi
+
+    return 0
+}
+
+#############################################################################
+# Vault Secret Path 管理函式
+#############################################################################
+
+# 建立 Secret Path
+vault_create_path() {
+    local path="$1"
+    local username="$2"
+    local capabilities="${3:-read,list}"
+
+    # 確保已登入
+    ensure_logged_in || return 1
+
+    info "正在建立 secret path：$path"
+
+    # 清理路徑中的特殊字元以建立 policy 名稱
+    local sanitized_path
+    sanitized_path=$(echo "$path" | tr '/' '-' | tr -d '*')
+    local policy_name="path-${sanitized_path}"
+
+    # 如果提供了 username，則使用 user-specific policy
+    if [[ -n "$username" ]]; then
+        policy_name="user-${username}-path"
+    fi
+
+    # 建立 policy
+    vault_create_policy "$policy_name" "$path" "$capabilities" || return 1
+
+    # 如果提供了 username，將 policy 附加到使用者
+    if [[ -n "$username" ]]; then
+        info "正在將 policy 附加到使用者：$username"
+
+        # 讀取使用者現有的 policies
+        local curl_opts
+        curl_opts=$(get_curl_opts)
+
+        local response
+        response=$(curl $curl_opts -w "\n%{http_code}" \
+            -H "X-Vault-Token: $VAULT_TOKEN" \
+            "${VAULT_ADDR}/v1/auth/userpass/users/${username}")
+
+        local http_body
+        local http_code
+        http_body=$(echo "$response" | sed -e '$d')
+        http_code=$(echo "$response" | tail -n 1)
+
+        if [[ "$http_code" != "200" ]]; then
+            error "讀取使用者資訊失敗（HTTP $http_code）"
+            return 1
+        fi
+
+        # 取得現有 policies
+        local existing_policies
+        existing_policies=$(echo "$http_body" | jq -r '.data.policies // ""')
+
+        # 加入新的 policy
+        local new_policies
+        if [[ -z "$existing_policies" ]]; then
+            new_policies="$policy_name"
+        else
+            new_policies="${existing_policies},${policy_name}"
+        fi
+
+        # 更新使用者
+        local update_payload
+        update_payload=$(jq -n --arg policies "$new_policies" '{policies: $policies}')
+
+        response=$(curl $curl_opts -w "\n%{http_code}" \
+            -X POST \
+            -H "X-Vault-Token: $VAULT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$update_payload" \
+            "${VAULT_ADDR}/v1/auth/userpass/users/${username}")
+
+        http_code=$(echo "$response" | tail -n 1)
+
+        if [[ "$http_code" != "204" ]]; then
+            error "更新使用者 policies 失敗（HTTP $http_code）"
+            return 1
+        fi
+
+        success "Policy 已附加到使用者：$username"
+    fi
+
+    success "Secret path 建立成功：$path"
+    info "Policy：$policy_name"
+    return 0
+}
+
+# 列出所有 policies
+vault_list_policies() {
+    # 確保已登入
+    ensure_logged_in || return 1
+
+    info "正在列出 policies..."
+
+    local curl_opts
+    curl_opts=$(get_curl_opts)
+
+    local response
+    response=$(curl $curl_opts -w "\n%{http_code}" \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        "${VAULT_ADDR}/v1/sys/policy")
+
+    local http_body
+    local http_code
+    http_body=$(echo "$response" | sed -e '$d')
+    http_code=$(echo "$response" | tail -n 1)
+
+    if [[ "$http_code" != "200" ]]; then
+        error "列出 policies 失敗（HTTP $http_code）"
+
+        local error_msg
+        error_msg=$(echo "$http_body" | jq -r '.errors[]?' 2>/dev/null || echo "")
+
+        if [[ -n "$error_msg" ]]; then
+            error "錯誤詳情：$error_msg"
+        fi
+
+        return 1
+    fi
+
+    local policies
+    policies=$(echo "$http_body" | jq -r '.data.keys[]?' 2>/dev/null)
+
+    if [[ -z "$policies" ]]; then
+        warning "沒有找到任何 policies"
+        return 0
+    fi
+
+    echo ""
+    echo "Policies 列表："
+    echo "---"
+    echo "$policies" | while IFS= read -r policy; do
+        echo "  📋 $policy"
+    done
+    echo ""
+
+    success "列出成功"
+    return 0
+}
+
+# 查看 Policy 內容
+vault_get_policy() {
+    local policy_name="$1"
+
+    # 確保已登入
+    ensure_logged_in || return 1
+
+    info "正在讀取 policy：$policy_name"
+
+    local curl_opts
+    curl_opts=$(get_curl_opts)
+
+    local response
+    response=$(curl $curl_opts -w "\n%{http_code}" \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        "${VAULT_ADDR}/v1/sys/policies/acl/${policy_name}")
+
+    local http_body
+    local http_code
+    http_body=$(echo "$response" | sed -e '$d')
+    http_code=$(echo "$response" | tail -n 1)
+
+    if [[ "$http_code" != "200" ]]; then
+        if [[ "$http_code" == "404" ]]; then
+            error "Policy 不存在：$policy_name"
+        else
+            error "讀取 policy 失敗（HTTP $http_code）"
+
+            local error_msg
+            error_msg=$(echo "$http_body" | jq -r '.errors[]?' 2>/dev/null || echo "")
+
+            if [[ -n "$error_msg" ]]; then
+                error "錯誤詳情：$error_msg"
+            fi
+        fi
+
+        return 1
+    fi
+
+    local policy_content
+    policy_content=$(echo "$http_body" | jq -r '.data.policy')
+
+    echo ""
+    echo "Policy: $policy_name"
+    echo "---"
+    echo "$policy_content"
+    echo ""
+
+    success "讀取成功"
     return 0
 }
 
@@ -685,46 +1291,80 @@ show_usage() {
 HashiCorp Vault 管理工具
 
 使用方法：
-  $0 <command> <mount> <path> [options]
+  $0 <command> [arguments] [options]
 
-命令：
-  get       讀取 secret
-  create    建立 secret
-  update    更新 secret
-  delete    刪除 secret
-  list      列出 secrets
+Secret 管理命令：
+  get <mount> <path> [--format <json|table>]
+      讀取 secret
+      
+  create <mount> <path> <key1>=<value1> [<key2>=<value2> ...]
+      建立 secret
+      
+  update <mount> <path> <key1>=<value1> [<key2>=<value2> ...] [--replace]
+      更新 secret（預設部分更新，--replace 為完整覆蓋）
+      
+  delete <mount> <path>
+      刪除 secret
+      
+  list <mount> [<path>]
+      列出 secrets
+
+使用者管理命令：
+  user-create <username> <password> [--path <custom-path>]
+      建立新使用者（自動建立 policy 和 secret path）
+      
+  user-list
+      列出所有 userpass 使用者
+      
+  user-delete <username> [--keep-secrets]
+      刪除使用者（預設會詢問是否刪除 secrets）
+
+Path 管理命令：
+  path-create <path> [<username>] [--capabilities <cap1,cap2,...>]
+      建立 secret path 並設定權限
+      預設 capabilities: read,list
+      
+  policy-list
+      列出所有 policies
+      
+  policy-get <policy-name>
+      查看 policy 內容
 
 選項：
-  --format <json|table>    輸出格式（預設：json）
-  --replace                更新時完整覆蓋（僅用於 update）
-  -h, --help               顯示此說明
+  --format <json|table>           輸出格式（預設：json）
+  --replace                       更新時完整覆蓋（僅用於 update）
+  --path <custom-path>            自訂 secret path（僅用於 user-create）
+  --keep-secrets                  刪除使用者時保留 secrets（僅用於 user-delete）
+  --capabilities <cap1,cap2,...>  設定權限（僅用於 path-create）
+  -h, --help                      顯示此說明
 
 範例：
-  # 讀取 secret
-  $0 get secrets teams/job-finder/environments/qa/db-user
 
-  # 讀取 secret（表格格式）
-  $0 get secrets teams/job-finder/environments/qa/db-user --format table
+  # Secret 操作
+  $0 get secret teams/job-finder/qa/db-user
+  $0 get secret teams/job-finder/qa/db-user --format table
+  $0 create secret teams/test/api-key key1=value1 key2=value2
+  $0 update secret teams/test/api-key key3=value3
+  $0 update secret teams/test/api-key key1=new1 --replace
+  $0 list secret teams/job-finder
+  $0 delete secret teams/test/api-key
 
-  # 建立 secret
-  $0 create secrets teams/test/api-key key1=value1 key2=value2
+  # 使用者管理
+  $0 user-create john MyPassword123
+  $0 user-create alice SecurePass456 --path secret/custom/alice
+  $0 user-list
+  $0 user-delete john
 
-  # 更新 secret（部分更新）
-  $0 update secrets teams/test/api-key key3=value3
-
-  # 更新 secret（完整覆蓋）
-  $0 update secrets teams/test/api-key key1=new1 key2=new2 --replace
-
-  # 列出 secrets
-  $0 list secrets teams/job-finder
-
-  # 刪除 secret
-  $0 delete secrets teams/test/api-key
+  # Path 管理
+  $0 path-create secret/shared/team alice --capabilities read,list
+  $0 path-create secret/public --capabilities read
+  $0 policy-list
+  $0 policy-get user-john
 
 環境變數：
   VAULT_ADDR          Vault 伺服器位址
   VAULT_SKIP_VERIFY   跳過 TLS 驗證（true/false）
-  VAULT_USERNAME      Vault 使用者名稱
+  VAULT_USERNAME      Vault 使用者名稱（管理員）
   VAULT_PASSWORD      Vault 密碼
 
 EOF
@@ -844,10 +1484,132 @@ main() {
             vault_list_secrets "$mount" "$path"
             ;;
 
+        user-create)
+            # 格式：user-create <username> <password> [--path <custom-path>]
+            if [[ $# -lt 2 ]]; then
+                error "用法：$0 user-create <username> <password> [--path <custom-path>]"
+                exit 1
+            fi
+
+            local username="$1"
+            local password="$2"
+            shift 2
+
+            # 解析選項
+            local custom_path=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --path)
+                        if [[ $# -lt 2 ]]; then
+                            error "--path 需要指定值"
+                            exit 1
+                        fi
+                        custom_path="$2"
+                        shift 2
+                        ;;
+                    *)
+                        error "未知的選項：$1"
+                        exit 1
+                        ;;
+                esac
+            done
+
+            vault_create_user "$username" "$password" "$custom_path"
+            ;;
+
+        user-list)
+            vault_list_users
+            ;;
+
+        user-delete)
+            # 格式：user-delete <username> [--keep-secrets]
+            if [[ $# -lt 1 ]]; then
+                error "用法：$0 user-delete <username> [--keep-secrets]"
+                exit 1
+            fi
+
+            local username="$1"
+            shift
+
+            # 解析選項
+            local keep_secrets="false"
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --keep-secrets)
+                        keep_secrets="true"
+                        shift
+                        ;;
+                    *)
+                        error "未知的選項：$1"
+                        exit 1
+                        ;;
+                esac
+            done
+
+            vault_delete_user "$username" "$keep_secrets"
+            ;;
+
+        path-create)
+            # 格式：path-create <path> [<username>] [--capabilities <cap1,cap2,...>]
+            if [[ $# -lt 1 ]]; then
+                error "用法：$0 path-create <path> [<username>] [--capabilities <cap1,cap2,...>]"
+                exit 1
+            fi
+
+            local path="$1"
+            local username=""
+            local capabilities="read,list"
+            shift
+
+            # 第二個參數可能是 username 或選項
+            if [[ $# -gt 0 ]] && [[ "$1" != --* ]]; then
+                username="$1"
+                shift
+            fi
+
+            # 解析選項
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --capabilities)
+                        if [[ $# -lt 2 ]]; then
+                            error "--capabilities 需要指定值"
+                            exit 1
+                        fi
+                        capabilities="$2"
+                        shift 2
+                        ;;
+                    *)
+                        error "未知的選項：$1"
+                        exit 1
+                        ;;
+                esac
+            done
+
+            vault_create_path "$path" "$username" "$capabilities"
+            ;;
+
+        policy-list)
+            vault_list_policies
+            ;;
+
+        policy-get)
+            # 格式：policy-get <policy-name>
+            if [[ $# -lt 1 ]]; then
+                error "用法：$0 policy-get <policy-name>"
+                exit 1
+            fi
+
+            local policy_name="$1"
+            vault_get_policy "$policy_name"
+            ;;
+
         *)
             error "未知的命令：$command"
             echo "" >&2
-            echo "支援的命令：get, create, update, delete, list" >&2
+            echo "支援的命令：" >&2
+            echo "  Secret: get, create, update, delete, list" >&2
+            echo "  User: user-create, user-list, user-delete" >&2
+            echo "  Path: path-create, policy-list, policy-get" >&2
             echo "使用 $0 --help 查看詳細說明" >&2
             exit 1
             ;;
