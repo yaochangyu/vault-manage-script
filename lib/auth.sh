@@ -83,6 +83,7 @@ test_connection() {
     result=$(sqlcmd -S "$SQL_SERVER,$SQL_PORT" \
                     -U "$ADMIN_USER" \
                     -P "$ADMIN_PASSWORD" \
+                    -C \
                     -Q "$test_query" \
                     -h -1 \
                     -W \
@@ -158,6 +159,7 @@ execute_sql() {
     result=$(sqlcmd -S "$SQL_SERVER,$SQL_PORT" \
                     -U "$ADMIN_USER" \
                     -P "$ADMIN_PASSWORD" \
+                    -C \
                     -d "$database" \
                     -Q "$sql_command" \
                     "${sqlcmd_opts[@]}" \
@@ -212,6 +214,7 @@ execute_sql_quiet() {
     sqlcmd -S "$SQL_SERVER,$SQL_PORT" \
            -U "$ADMIN_USER" \
            -P "$ADMIN_PASSWORD" \
+           -C \
            -d "$database" \
            -Q "$sql_command" \
            -t "$QUERY_TIMEOUT" \
@@ -258,6 +261,7 @@ execute_sql_scalar() {
     result=$(sqlcmd -S "$SQL_SERVER,$SQL_PORT" \
                     -U "$ADMIN_USER" \
                     -P "$ADMIN_PASSWORD" \
+                    -C \
                     -d "$database" \
                     -Q "$sql_command" \
                     -h -1 \
