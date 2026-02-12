@@ -1,0 +1,79 @@
+{
+  "_comment": "SQL Server 權限批次設定範本 (JSON 格式)",
+  "_description": {
+    "username": "目標使用者名稱",
+    "action": "操作類型 (grant=授予, revoke=撤銷)",
+    "level": "權限層級 (server, database, object)",
+    "role": "角色名稱 (單一角色)",
+    "roles": "角色清單 (多個角色)",
+    "database": "資料庫名稱",
+    "object": "物件名稱 (格式: schema.object_name)",
+    "permission": "權限名稱 (單一權限)",
+    "permissions": "權限清單 (多個權限)"
+  },
+  "permissions": [
+    {
+      "_comment": "Server 層級權限 - 單一角色",
+      "username": "user1",
+      "action": "grant",
+      "level": "server",
+      "role": "sysadmin"
+    },
+    {
+      "_comment": "Server 層級權限 - 另一個使用者",
+      "username": "user2",
+      "action": "grant",
+      "level": "server",
+      "role": "securityadmin"
+    },
+    {
+      "_comment": "Database 層級權限 - 多個角色",
+      "username": "app_user",
+      "action": "grant",
+      "level": "database",
+      "database": "MyAppDB",
+      "roles": ["db_datareader", "db_datawriter"]
+    },
+    {
+      "_comment": "Database 層級權限 - 唯讀使用者",
+      "username": "report_user",
+      "action": "grant",
+      "level": "database",
+      "database": "MyAppDB",
+      "role": "db_datareader"
+    },
+    {
+      "_comment": "Object 層級權限 - 單一權限",
+      "username": "guest_user",
+      "action": "grant",
+      "level": "object",
+      "database": "MyAppDB",
+      "object": "dbo.Users",
+      "permission": "SELECT"
+    },
+    {
+      "_comment": "Object 層級權限 - 多個權限",
+      "username": "api_user",
+      "action": "grant",
+      "level": "object",
+      "database": "MyAppDB",
+      "object": "dbo.Orders",
+      "permissions": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "_comment": "撤銷權限範例 - Database 角色",
+      "username": "old_user",
+      "action": "revoke",
+      "level": "database",
+      "database": "OldDB",
+      "role": "db_owner"
+    },
+    {
+      "_comment": "撤銷權限範例 - Server 角色",
+      "username": "temp_user",
+      "action": "revoke",
+      "level": "server",
+      "role": "sysadmin"
+    }
+  ]
+}

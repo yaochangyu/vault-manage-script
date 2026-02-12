@@ -27,3 +27,4 @@ Thumbs.db
 test_*.sh
 tmp/
 temp/
+data/sqlserver/

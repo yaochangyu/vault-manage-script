@@ -1,0 +1,32 @@
+# SQL Server 權限批次設定範本 (CSV 格式)
+# 格式說明：username,action,level,target,role_or_permission,database
+#
+# 欄位說明：
+#   username            - 目標使用者名稱
+#   action              - 操作類型 (grant=授予, revoke=撤銷)
+#   level               - 權限層級 (server, database, object)
+#   target              - 目標物件 (僅 object 層級需要，格式：schema.object_name)
+#   role_or_permission  - 角色名稱或權限名稱
+#   database            - 資料庫名稱 (database/object 層級需要)
+#
+# 範例：
+
+# Server 層級權限
+user1,grant,server,,sysadmin,
+user2,grant,server,,securityadmin,
+
+# Database 層級權限
+app_user,grant,database,MyAppDB,db_datareader,MyAppDB
+app_user,grant,database,MyAppDB,db_datawriter,MyAppDB
+report_user,grant,database,MyAppDB,db_datareader,MyAppDB
+
+# Object 層級權限
+guest_user,grant,object,dbo.Users,SELECT,MyAppDB
+guest_user,grant,object,dbo.Products,SELECT,MyAppDB
+api_user,grant,object,dbo.Orders,SELECT,MyAppDB
+api_user,grant,object,dbo.Orders,INSERT,MyAppDB
+api_user,grant,object,dbo.Orders,UPDATE,MyAppDB
+
+# 撤銷權限範例
+# old_user,revoke,database,OldDB,db_owner,OldDB
+# temp_user,revoke,server,,sysadmin,
