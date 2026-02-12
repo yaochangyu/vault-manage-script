@@ -6,16 +6,7 @@
 # 功能：
 #   - 使用 userpass 認證登入 Vault
 #   - 支援 KV secrets 的完整 CRUD 操作
-#   - 支援 User 和 Policy 管理
 #   - 支援 JSON 和表格格式輸出
-#
-# 命令格式：
-#   ./vault-manage.sh <command> <subcommand> [arguments] [options]
-#   
-#   命令分類：
-#     - secret   : Secret 管理 (get, create, update, delete, list)
-#     - user     : User 管理 (create, list, delete)
-#     - policy   : Policy 管理 (create, list, get)
 #
 # 需求：
 #   - bash 4.0+
@@ -23,7 +14,7 @@
 #   - jq
 #
 # 作者：DevOps Team
-# 版本：2.0.0
+# 版本：1.0.0
 #############################################################################
 
 set -euo pipefail
@@ -1300,75 +1291,75 @@ show_usage() {
 HashiCorp Vault 管理工具
 
 使用方法：
-  $0 <command> <subcommand> [arguments] [options]
+  $0 <command> [arguments] [options]
 
 Secret 管理命令：
-  secret get <mount> <path> [--format <json|table>]
+  get <mount> <path> [--format <json|table>]
       讀取 secret
       
-  secret create <mount> <path> <key1>=<value1> [<key2>=<value2> ...]
+  create <mount> <path> <key1>=<value1> [<key2>=<value2> ...]
       建立 secret
       
-  secret update <mount> <path> <key1>=<value1> [<key2>=<value2> ...] [--replace]
+  update <mount> <path> <key1>=<value1> [<key2>=<value2> ...] [--replace]
       更新 secret（預設部分更新，--replace 為完整覆蓋）
       
-  secret delete <mount> <path>
+  delete <mount> <path>
       刪除 secret
       
-  secret list <mount> [<path>]
+  list <mount> [<path>]
       列出 secrets
 
 使用者管理命令：
-  user create <username> <password> [--path <custom-path>]
+  user-create <username> <password> [--path <custom-path>]
       建立新使用者（自動建立 policy 和 secret path）
       
-  user list
+  user-list
       列出所有 userpass 使用者
       
-  user delete <username> [--keep-secrets]
+  user-delete <username> [--keep-secrets]
       刪除使用者（預設會詢問是否刪除 secrets）
 
-Policy 管理命令：
-  policy create <path> [<username>] [--capabilities <cap1,cap2,...>]
+Path 管理命令：
+  path-create <path> [<username>] [--capabilities <cap1,cap2,...>]
       建立 secret path 並設定權限
       預設 capabilities: read,list
       
-  policy list
+  policy-list
       列出所有 policies
       
-  policy get <policy-name>
+  policy-get <policy-name>
       查看 policy 內容
 
 選項：
   --format <json|table>           輸出格式（預設：json）
-  --replace                       更新時完整覆蓋（僅用於 secret update）
-  --path <custom-path>            自訂 secret path（僅用於 user create）
-  --keep-secrets                  刪除使用者時保留 secrets（僅用於 user delete）
-  --capabilities <cap1,cap2,...>  設定權限（僅用於 policy create）
+  --replace                       更新時完整覆蓋（僅用於 update）
+  --path <custom-path>            自訂 secret path（僅用於 user-create）
+  --keep-secrets                  刪除使用者時保留 secrets（僅用於 user-delete）
+  --capabilities <cap1,cap2,...>  設定權限（僅用於 path-create）
   -h, --help                      顯示此說明
 
 範例：
 
   # Secret 操作
-  $0 secret get secret teams/job-finder/qa/db-user
-  $0 secret get secret teams/job-finder/qa/db-user --format table
-  $0 secret create secret teams/test/api-key key1=value1 key2=value2
-  $0 secret update secret teams/test/api-key key3=value3
-  $0 secret update secret teams/test/api-key key1=new1 --replace
-  $0 secret list secret teams/job-finder
-  $0 secret delete secret teams/test/api-key
+  $0 get secret teams/job-finder/qa/db-user
+  $0 get secret teams/job-finder/qa/db-user --format table
+  $0 create secret teams/test/api-key key1=value1 key2=value2
+  $0 update secret teams/test/api-key key3=value3
+  $0 update secret teams/test/api-key key1=new1 --replace
+  $0 list secret teams/job-finder
+  $0 delete secret teams/test/api-key
 
   # 使用者管理
-  $0 user create john MyPassword123
-  $0 user create alice SecurePass456 --path secret/custom/alice
-  $0 user list
-  $0 user delete john
+  $0 user-create john MyPassword123
+  $0 user-create alice SecurePass456 --path secret/custom/alice
+  $0 user-list
+  $0 user-delete john
 
-  # Policy 管理
-  $0 policy create secret/shared/team alice --capabilities read,list
-  $0 policy create secret/public --capabilities read
-  $0 policy list
-  $0 policy get user-john
+  # Path 管理
+  $0 path-create secret/shared/team alice --capabilities read,list
+  $0 path-create secret/public --capabilities read
+  $0 policy-list
+  $0 policy-get user-john
 
 環境變數：
   VAULT_ADDR          Vault 伺服器位址
@@ -1400,291 +1391,225 @@ main() {
         exit 1
     fi
 
-    # 解析主命令
-    local main_command="$1"
+    # 解析命令
+    local command="$1"
     shift
 
-    # 根據主命令執行對應的操作
-    case "$main_command" in
-        secret)
-            # Secret 子命令
-            if [[ $# -lt 1 ]]; then
-                error "用法：$0 secret <subcommand> [args...]"
-                echo "" >&2
-                echo "子命令：get, create, update, delete, list" >&2
+    # 根據命令執行對應的操作
+    case "$command" in
+        get)
+            # 格式：get <mount> <path> [--format <json|table>]
+            if [[ $# -lt 2 ]]; then
+                error "用法：$0 get <mount> <path> [--format <json|table>]"
                 exit 1
             fi
 
-            local sub_command="$1"
-            shift
+            local mount="$1"
+            local path="$2"
+            shift 2
 
-            case "$sub_command" in
-                get)
-                    # 格式：secret get <mount> <path> [--format <json|table>]
-                    if [[ $# -lt 2 ]]; then
-                        error "用法：$0 secret get <mount> <path> [--format <json|table>]"
+            # 解析選項
+            local format="json"
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --format)
+                        if [[ $# -lt 2 ]]; then
+                            error "--format 需要指定值（json 或 table）"
+                            exit 1
+                        fi
+                        format="$2"
+                        shift 2
+                        ;;
+                    *)
+                        error "未知的選項：$1"
                         exit 1
-                    fi
+                        ;;
+                esac
+            done
 
-                    local mount="$1"
-                    local path="$2"
-                    shift 2
-
-                    # 解析選項
-                    local format="json"
-                    while [[ $# -gt 0 ]]; do
-                        case "$1" in
-                            --format)
-                                if [[ $# -lt 2 ]]; then
-                                    error "--format 需要指定值（json 或 table）"
-                                    exit 1
-                                fi
-                                format="$2"
-                                shift 2
-                                ;;
-                            *)
-                                error "未知的選項：$1"
-                                exit 1
-                                ;;
-                        esac
-                    done
-
-                    vault_get_secret "$mount" "$path" "$format"
-                    ;;
-
-                create)
-                    # 格式：secret create <mount> <path> <key1>=<value1> ...
-                    if [[ $# -lt 3 ]]; then
-                        error "用法：$0 secret create <mount> <path> <key1>=<value1> [<key2>=<value2> ...]"
-                        exit 1
-                    fi
-
-                    local mount="$1"
-                    local path="$2"
-                    shift 2
-
-                    vault_create_secret "$mount" "$path" "$@"
-                    ;;
-
-                update)
-                    # 格式：secret update <mount> <path> <key1>=<value1> ... [--replace]
-                    if [[ $# -lt 3 ]]; then
-                        error "用法：$0 secret update <mount> <path> <key1>=<value1> [<key2>=<value2> ...] [--replace]"
-                        exit 1
-                    fi
-
-                    local mount="$1"
-                    local path="$2"
-                    shift 2
-
-                    vault_update_secret "$mount" "$path" "$@"
-                    ;;
-
-                delete)
-                    # 格式：secret delete <mount> <path>
-                    if [[ $# -lt 2 ]]; then
-                        error "用法：$0 secret delete <mount> <path>"
-                        exit 1
-                    fi
-
-                    local mount="$1"
-                    local path="$2"
-
-                    vault_delete_secret "$mount" "$path"
-                    ;;
-
-                list)
-                    # 格式：secret list <mount> [<path>]
-                    if [[ $# -lt 1 ]]; then
-                        error "用法：$0 secret list <mount> [<path>]"
-                        exit 1
-                    fi
-
-                    local mount="$1"
-                    local path="${2:-}"
-
-                    vault_list_secrets "$mount" "$path"
-                    ;;
-
-                *)
-                    error "未知的 secret 子命令：$sub_command"
-                    echo "" >&2
-                    echo "支援的子命令：get, create, update, delete, list" >&2
-                    exit 1
-                    ;;
-            esac
+            vault_get_secret "$mount" "$path" "$format"
             ;;
 
-        user)
-            # User 子命令
-            if [[ $# -lt 1 ]]; then
-                error "用法：$0 user <subcommand> [args...]"
-                echo "" >&2
-                echo "子命令：create, list, delete" >&2
+        create)
+            # 格式：create <mount> <path> <key1>=<value1> ...
+            if [[ $# -lt 3 ]]; then
+                error "用法：$0 create <mount> <path> <key1>=<value1> [<key2>=<value2> ...]"
                 exit 1
             fi
 
-            local sub_command="$1"
-            shift
+            local mount="$1"
+            local path="$2"
+            shift 2
 
-            case "$sub_command" in
-                create)
-                    # 格式：user create <username> <password> [--path <custom-path>]
-                    if [[ $# -lt 2 ]]; then
-                        error "用法：$0 user create <username> <password> [--path <custom-path>]"
-                        exit 1
-                    fi
-
-                    local username="$1"
-                    local password="$2"
-                    shift 2
-
-                    # 解析選項
-                    local custom_path=""
-                    while [[ $# -gt 0 ]]; do
-                        case "$1" in
-                            --path)
-                                if [[ $# -lt 2 ]]; then
-                                    error "--path 需要指定值"
-                                    exit 1
-                                fi
-                                custom_path="$2"
-                                shift 2
-                                ;;
-                            *)
-                                error "未知的選項：$1"
-                                exit 1
-                                ;;
-                        esac
-                    done
-
-                    vault_create_user "$username" "$password" "$custom_path"
-                    ;;
-
-                list)
-                    vault_list_users
-                    ;;
-
-                delete)
-                    # 格式：user delete <username> [--keep-secrets]
-                    if [[ $# -lt 1 ]]; then
-                        error "用法：$0 user delete <username> [--keep-secrets]"
-                        exit 1
-                    fi
-
-                    local username="$1"
-                    shift
-
-                    # 解析選項
-                    local keep_secrets="false"
-                    while [[ $# -gt 0 ]]; do
-                        case "$1" in
-                            --keep-secrets)
-                                keep_secrets="true"
-                                shift
-                                ;;
-                            *)
-                                error "未知的選項：$1"
-                                exit 1
-                                ;;
-                        esac
-                    done
-
-                    vault_delete_user "$username" "$keep_secrets"
-                    ;;
-
-                *)
-                    error "未知的 user 子命令：$sub_command"
-                    echo "" >&2
-                    echo "支援的子命令：create, list, delete" >&2
-                    exit 1
-                    ;;
-            esac
+            vault_create_secret "$mount" "$path" "$@"
             ;;
 
-        policy)
-            # Policy 子命令
-            if [[ $# -lt 1 ]]; then
-                error "用法：$0 policy <subcommand> [args...]"
-                echo "" >&2
-                echo "子命令：create, list, get" >&2
+        update)
+            # 格式：update <mount> <path> <key1>=<value1> ... [--replace]
+            if [[ $# -lt 3 ]]; then
+                error "用法：$0 update <mount> <path> <key1>=<value1> [<key2>=<value2> ...] [--replace]"
                 exit 1
             fi
 
-            local sub_command="$1"
+            local mount="$1"
+            local path="$2"
+            shift 2
+
+            vault_update_secret "$mount" "$path" "$@"
+            ;;
+
+        delete)
+            # 格式：delete <mount> <path>
+            if [[ $# -lt 2 ]]; then
+                error "用法：$0 delete <mount> <path>"
+                exit 1
+            fi
+
+            local mount="$1"
+            local path="$2"
+
+            vault_delete_secret "$mount" "$path"
+            ;;
+
+        list)
+            # 格式：list <mount> [<path>]
+            if [[ $# -lt 1 ]]; then
+                error "用法：$0 list <mount> [<path>]"
+                exit 1
+            fi
+
+            local mount="$1"
+            local path="${2:-}"
+
+            vault_list_secrets "$mount" "$path"
+            ;;
+
+        user-create)
+            # 格式：user-create <username> <password> [--path <custom-path>]
+            if [[ $# -lt 2 ]]; then
+                error "用法：$0 user-create <username> <password> [--path <custom-path>]"
+                exit 1
+            fi
+
+            local username="$1"
+            local password="$2"
+            shift 2
+
+            # 解析選項
+            local custom_path=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --path)
+                        if [[ $# -lt 2 ]]; then
+                            error "--path 需要指定值"
+                            exit 1
+                        fi
+                        custom_path="$2"
+                        shift 2
+                        ;;
+                    *)
+                        error "未知的選項：$1"
+                        exit 1
+                        ;;
+                esac
+            done
+
+            vault_create_user "$username" "$password" "$custom_path"
+            ;;
+
+        user-list)
+            vault_list_users
+            ;;
+
+        user-delete)
+            # 格式：user-delete <username> [--keep-secrets]
+            if [[ $# -lt 1 ]]; then
+                error "用法：$0 user-delete <username> [--keep-secrets]"
+                exit 1
+            fi
+
+            local username="$1"
             shift
 
-            case "$sub_command" in
-                create)
-                    # 格式：policy create <path> [<username>] [--capabilities <cap1,cap2,...>]
-                    if [[ $# -lt 1 ]]; then
-                        error "用法：$0 policy create <path> [<username>] [--capabilities <cap1,cap2,...>]"
-                        exit 1
-                    fi
-
-                    local path="$1"
-                    local username=""
-                    local capabilities="read,list"
-                    shift
-
-                    # 第二個參數可能是 username 或選項
-                    if [[ $# -gt 0 ]] && [[ "$1" != --* ]]; then
-                        username="$1"
+            # 解析選項
+            local keep_secrets="false"
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --keep-secrets)
+                        keep_secrets="true"
                         shift
-                    fi
-
-                    # 解析選項
-                    while [[ $# -gt 0 ]]; do
-                        case "$1" in
-                            --capabilities)
-                                if [[ $# -lt 2 ]]; then
-                                    error "--capabilities 需要指定值"
-                                    exit 1
-                                fi
-                                capabilities="$2"
-                                shift 2
-                                ;;
-                            *)
-                                error "未知的選項：$1"
-                                exit 1
-                                ;;
-                        esac
-                    done
-
-                    vault_create_path "$path" "$username" "$capabilities"
-                    ;;
-
-                list)
-                    vault_list_policies
-                    ;;
-
-                get)
-                    # 格式：policy get <policy-name>
-                    if [[ $# -lt 1 ]]; then
-                        error "用法：$0 policy get <policy-name>"
+                        ;;
+                    *)
+                        error "未知的選項：$1"
                         exit 1
-                    fi
+                        ;;
+                esac
+            done
 
-                    local policy_name="$1"
-                    vault_get_policy "$policy_name"
-                    ;;
+            vault_delete_user "$username" "$keep_secrets"
+            ;;
 
-                *)
-                    error "未知的 policy 子命令：$sub_command"
-                    echo "" >&2
-                    echo "支援的子命令：create, list, get" >&2
-                    exit 1
-                    ;;
-            esac
+        path-create)
+            # 格式：path-create <path> [<username>] [--capabilities <cap1,cap2,...>]
+            if [[ $# -lt 1 ]]; then
+                error "用法：$0 path-create <path> [<username>] [--capabilities <cap1,cap2,...>]"
+                exit 1
+            fi
+
+            local path="$1"
+            local username=""
+            local capabilities="read,list"
+            shift
+
+            # 第二個參數可能是 username 或選項
+            if [[ $# -gt 0 ]] && [[ "$1" != --* ]]; then
+                username="$1"
+                shift
+            fi
+
+            # 解析選項
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --capabilities)
+                        if [[ $# -lt 2 ]]; then
+                            error "--capabilities 需要指定值"
+                            exit 1
+                        fi
+                        capabilities="$2"
+                        shift 2
+                        ;;
+                    *)
+                        error "未知的選項：$1"
+                        exit 1
+                        ;;
+                esac
+            done
+
+            vault_create_path "$path" "$username" "$capabilities"
+            ;;
+
+        policy-list)
+            vault_list_policies
+            ;;
+
+        policy-get)
+            # 格式：policy-get <policy-name>
+            if [[ $# -lt 1 ]]; then
+                error "用法：$0 policy-get <policy-name>"
+                exit 1
+            fi
+
+            local policy_name="$1"
+            vault_get_policy "$policy_name"
             ;;
 
         *)
-            error "未知的命令：$main_command"
+            error "未知的命令：$command"
             echo "" >&2
             echo "支援的命令：" >&2
-            echo "  secret   - Secret 管理 (get, create, update, delete, list)" >&2
-            echo "  user     - User 管理 (create, list, delete)" >&2
-            echo "  policy   - Policy 管理 (create, list, get)" >&2
+            echo "  Secret: get, create, update, delete, list" >&2
+            echo "  User: user-create, user-list, user-delete" >&2
+            echo "  Path: path-create, policy-list, policy-get" >&2
             echo "使用 $0 --help 查看詳細說明" >&2
             exit 1
             ;;
