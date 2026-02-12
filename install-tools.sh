@@ -19,6 +19,7 @@ set -e  # 遇到錯誤立即退出
 # 預設選項（預設安裝所有工具）
 INSTALL_SQLCMD=true
 INSTALL_JQ=true
+INSTALL_VAULT=true
 
 # 顏色定義
 RED='\033[0;31m'
@@ -150,6 +151,40 @@ install_ubuntu_debian() {
         sudo apt-get install -y jq
         show_success "jq 安裝完成"
     fi
+
+    # 安裝 HashiCorp Vault CLI
+    if [ "$INSTALL_VAULT" = true ]; then
+        show_info "開始安裝 HashiCorp Vault CLI..."
+
+        # 1. 匯入 HashiCorp GPG 金鑰
+        show_info "匯入 HashiCorp GPG 金鑰..."
+        if [ -f /usr/share/keyrings/hashicorp-archive-keyring.gpg ]; then
+            show_info "GPG 金鑰已存在，跳過下載"
+        else
+            wget -O- https://apt.releases.hashicorp.com/gpg | \
+                sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+            show_success "GPG 金鑰匯入完成"
+        fi
+
+        # 2. 註冊 HashiCorp 儲存庫
+        if [ -f /etc/apt/sources.list.d/hashicorp.list ]; then
+            show_info "HashiCorp 儲存庫已存在，跳過設定"
+        else
+            show_info "註冊 HashiCorp 儲存庫..."
+            local CODENAME=$(lsb_release -cs)
+            echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com ${CODENAME} main" | \
+                sudo tee /etc/apt/sources.list.d/hashicorp.list > /dev/null
+            show_success "儲存庫設定完成"
+        fi
+
+        # 3. 更新套件清單並安裝 vault
+        show_info "更新套件清單..."
+        sudo apt-get update -qq
+
+        show_info "安裝 Vault CLI..."
+        sudo apt-get install -y vault
+        show_success "Vault CLI 安裝完成"
+    fi
 }
 
 # 安裝 sqlcmd (RHEL/CentOS/Fedora)
@@ -182,6 +217,29 @@ install_rhel_centos() {
         show_info "安裝 jq (JSON 處理工具)..."
         sudo yum install -y jq
         show_success "jq 安裝完成"
+    fi
+
+    # 安裝 HashiCorp Vault CLI
+    if [ "$INSTALL_VAULT" = true ]; then
+        show_info "開始安裝 HashiCorp Vault CLI..."
+
+        # 1. 安裝 yum-config-manager
+        show_info "安裝 yum-utils..."
+        sudo yum install -y yum-utils
+
+        # 2. 註冊 HashiCorp 儲存庫
+        if [ -f /etc/yum.repos.d/hashicorp.repo ]; then
+            show_info "HashiCorp 儲存庫已存在，跳過設定"
+        else
+            show_info "註冊 HashiCorp 儲存庫..."
+            sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo
+            show_success "儲存庫設定完成"
+        fi
+
+        # 3. 安裝 vault
+        show_info "安裝 Vault CLI..."
+        sudo yum install -y vault
+        show_success "Vault CLI 安裝完成"
     fi
 }
 
@@ -267,13 +325,31 @@ verify_installation() {
         fi
     fi
 
+    # 驗證 Vault
+    if [ "$INSTALL_VAULT" = true ]; then
+        if command -v vault &> /dev/null; then
+            local vault_version=$(vault version 2>&1 | head -n 1)
+            show_success "Vault CLI 安裝成功！"
+            echo "  版本: $vault_version"
+        else
+            show_error "Vault CLI 安裝失敗"
+            success=false
+        fi
+    fi
+
     echo ""
 
     if [ "$success" = true ]; then
+        echo "使用方式:"
         if [ "$INSTALL_SQLCMD" = true ]; then
-            echo "使用方式:"
             echo "  sqlcmd -S <server> -U <username> -P <password>"
-            echo ""
+        fi
+        if [ "$INSTALL_VAULT" = true ]; then
+            echo "  vault --help"
+            echo "  vault login"
+        fi
+        echo ""
+        if [ "$INSTALL_SQLCMD" = true ]; then
             show_info "請重新載入 shell 或執行以下命令以套用 PATH 變更："
             echo "  source ~/.bashrc  (如果使用 bash)"
             echo "  source ~/.zshrc   (如果使用 zsh)"
@@ -287,26 +363,36 @@ verify_installation() {
 # 顯示使用說明
 show_usage() {
     cat << EOF
-SQL Server 工具自動安裝腳本
+SQL Server & HashiCorp Vault 工具自動安裝腳本
 
 使用方式:
   $0 [選項]
 
 選項:
-  (無選項)          安裝所有工具：sqlcmd + jq（預設）
+  (無選項)          安裝所有工具：sqlcmd + jq + vault（預設）
   --sqlcmd-only     僅安裝 sqlcmd
   --jq-only         僅安裝 jq
+  --vault-only      僅安裝 HashiCorp Vault CLI
+  --no-vault        安裝 sqlcmd + jq（不安裝 vault）
+  --no-sqlcmd       安裝 jq + vault（不安裝 sqlcmd）
+  --no-jq           安裝 sqlcmd + vault（不安裝 jq）
   --help, -h        顯示此說明
 
 範例:
-  $0                # 安裝所有工具（sqlcmd + jq）
-  $0 --sqlcmd-only  # 僅安裝 sqlcmd
-  $0 --jq-only      # 僅安裝 jq
+  $0                 # 安裝所有工具（sqlcmd + jq + vault）
+  $0 --sqlcmd-only   # 僅安裝 sqlcmd
+  $0 --vault-only    # 僅安裝 Vault CLI
+  $0 --no-vault      # 安裝 sqlcmd + jq（不安裝 vault）
 
 支援的系統:
   - Ubuntu / Debian
   - RHEL / CentOS / Rocky Linux / AlmaLinux
   - Fedora
+
+安裝的工具:
+  - sqlcmd:  Microsoft SQL Server 命令列工具
+  - jq:      JSON 處理工具
+  - vault:   HashiCorp Vault CLI（密碼管理）
 EOF
 }
 
@@ -318,11 +404,31 @@ main() {
             --sqlcmd-only)
                 INSTALL_SQLCMD=true
                 INSTALL_JQ=false
+                INSTALL_VAULT=false
                 shift
                 ;;
             --jq-only)
                 INSTALL_SQLCMD=false
                 INSTALL_JQ=true
+                INSTALL_VAULT=false
+                shift
+                ;;
+            --vault-only)
+                INSTALL_SQLCMD=false
+                INSTALL_JQ=false
+                INSTALL_VAULT=true
+                shift
+                ;;
+            --no-vault)
+                INSTALL_VAULT=false
+                shift
+                ;;
+            --no-sqlcmd)
+                INSTALL_SQLCMD=false
+                shift
+                ;;
+            --no-jq)
+                INSTALL_JQ=false
                 shift
                 ;;
             --help|-h)
@@ -339,16 +445,24 @@ main() {
     done
 
     echo "========================================"
-    echo "  SQL Server 工具自動安裝腳本"
+    echo "  SQL Server & Vault 工具自動安裝腳本"
     echo "========================================"
     echo ""
 
-    if [ "$INSTALL_SQLCMD" = true ] && [ "$INSTALL_JQ" = true ]; then
-        show_info "將安裝: sqlcmd + jq"
-    elif [ "$INSTALL_SQLCMD" = true ]; then
-        show_info "將安裝: sqlcmd"
-    elif [ "$INSTALL_JQ" = true ]; then
-        show_info "將安裝: jq"
+    # 顯示將要安裝的工具
+    local install_list=""
+    [ "$INSTALL_SQLCMD" = true ] && install_list="${install_list}sqlcmd + "
+    [ "$INSTALL_JQ" = true ] && install_list="${install_list}jq + "
+    [ "$INSTALL_VAULT" = true ] && install_list="${install_list}vault + "
+
+    # 移除最後的 " + "
+    install_list=${install_list%" + "}
+
+    if [ -n "$install_list" ]; then
+        show_info "將安裝: $install_list"
+    else
+        show_error "未選擇任何工具安裝"
+        exit 1
     fi
 
     echo ""
