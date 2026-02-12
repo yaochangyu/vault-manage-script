@@ -67,6 +67,25 @@ info() {
     echo -e "${BLUE}[資訊]${NC} $1"
 }
 
+# 載入 .env 檔案（如果存在）
+load_env_file() {
+    local env_file=".env"
+
+    if [[ -f "$env_file" ]]; then
+        info "偵測到 .env 檔案，正在載入環境變數..."
+
+        # 使用 set -a 使所有變數自動 export
+        set -a
+        source "$env_file"
+        set +a
+
+        success ".env 檔案載入成功"
+        return 0
+    fi
+
+    return 1
+}
+
 # 檢查必要的環境變數
 check_env_vars() {
     local missing_vars=()
@@ -723,6 +742,9 @@ main() {
     if ! check_dependencies; then
         exit 1
     fi
+
+    # 嘗試載入 .env 檔案
+    load_env_file
 
     # 檢查環境變數
     if ! check_env_vars; then
