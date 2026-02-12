@@ -52,22 +52,68 @@ sudo yum install -y curl jq
 
 ### 1. 設定環境變數
 
-複製環境變數範本並填入實際資訊：
+#### 步驟 1.1：複製環境變數範本
+
+專案提供了 `.env.example` 範本檔案，請先複製為 `.env` 檔案：
 
 ```bash
 cp .env.example .env
 ```
 
-編輯 `.env` 檔案，填入你的 Vault 認證資訊：
+#### 步驟 1.2：編輯 .env 檔案
+
+使用你喜歡的編輯器開啟 `.env` 檔案：
 
 ```bash
+# 使用 vim
+vim .env
+
+# 或使用 nano
+nano .env
+
+# 或使用 VS Code
+code .env
+```
+
+#### 步驟 1.3：填入實際的認證資訊
+
+在 `.env` 檔案中，將以下變數替換為實際的 Vault 認證資訊：
+
+```bash
+# Vault 伺服器位址（必填）
 VAULT_ADDR=https://vault.web.internal
+
+# 跳過 TLS 憑證驗證（開發環境可設為 true，生產環境請設為 false）
 VAULT_SKIP_VERIFY=true
+
+# Vault 使用者名稱（必填）
 VAULT_USERNAME=your-username
+
+# Vault 密碼（必填）
 VAULT_PASSWORD=your-password
 ```
 
-⚠️ **重要**：`.env` 檔案包含機敏資料，已加入 `.gitignore`，請勿納入版控。
+**各欄位說明：**
+
+| 變數名稱 | 說明 | 範例 | 必填 |
+|---------|------|------|------|
+| `VAULT_ADDR` | Vault 伺服器的完整 URL | `https://vault.web.internal` | ✅ |
+| `VAULT_SKIP_VERIFY` | 是否跳過 TLS 憑證驗證<br>（開發環境可用 `true`，生產環境建議 `false`） | `true` 或 `false` | ✅ |
+| `VAULT_USERNAME` | Vault userpass 認證的使用者名稱 | `john.doe` | ✅ |
+| `VAULT_PASSWORD` | Vault userpass 認證的密碼 | `your-secure-password` | ✅ |
+
+#### 步驟 1.4：檢查檔案權限
+
+為了安全起見，建議將 `.env` 檔案權限設為僅擁有者可讀寫：
+
+```bash
+chmod 600 .env
+```
+
+⚠️ **安全警告**：
+- `.env` 檔案包含機敏資料，已加入 `.gitignore`，請勿納入版控
+- 不要在公開的地方分享 `.env` 檔案內容
+- 定期更換密碼，避免長期使用相同認證資訊
 
 ### 2. 載入環境變數
 
