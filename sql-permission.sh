@@ -251,8 +251,8 @@ cmd_get_all() {
     esac
 }
 
-# 建立使用者
-cmd_create_user() {
+# 設定使用者（建立或更新權限）
+cmd_setup_user() {
     # 解析選項
     local users=""
     local databases=""
@@ -317,7 +317,7 @@ cmd_create_user() {
     # 顯示操作摘要
     echo ""
     echo -e "${CYAN}========================================${NC}"
-    echo -e "${CYAN}  建立使用者與授予權限${NC}"
+    echo -e "${CYAN}  設定使用者與授予權限${NC}"
     echo -e "${CYAN}========================================${NC}"
     echo "使用者: ${user_array[*]}"
     echo "資料庫: ${db_array[*]}"
@@ -328,13 +328,13 @@ cmd_create_user() {
     echo ""
 
     # 確認操作
-    if ! confirm_action "確定要建立以上使用者並授予權限嗎？" "no"; then
+    if ! confirm_action "確定要設定以上使用者並授予權限嗎？" "no"; then
         show_warning "已取消操作"
         exit 0
     fi
 
     echo ""
-    show_info "開始建立使用者..."
+    show_info "開始設定使用者..."
     echo ""
 
     # 處理每個使用者
@@ -394,7 +394,7 @@ cmd_create_user() {
 
     echo ""
     echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}  使用者建立完成！${NC}"
+    echo -e "${GREEN}  使用者設定完成！${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
 
@@ -736,7 +736,8 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
 
 命令:
   ${CYAN}使用者管理${NC}
-    create-user [options]         建立使用者並授予權限（支援多個使用者和資料庫）
+    setup-user [options]          設定使用者並授予權限（支援建立新使用者或更新現有使用者）
+                                  別名: create-user
 
   ${CYAN}查詢權限${NC}
     get-user <username>           查詢特定使用者的權限
@@ -767,10 +768,10 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   --dry-run                       預覽變更但不執行
   --verbose                       詳細輸出
 
-建立使用者選項:
+設定使用者選項 (setup-user):
   --users <user1,user2,...>       使用者名稱（逗號分隔支援多個）
   --databases <db1,db2,...>       資料庫名稱（逗號分隔支援多個）
-  --password <password>           使用者密碼
+  --password <password>           使用者密碼（建立新使用者時必填）
   --grant-read                    授予讀取權限 (db_datareader)
   --grant-write                   授予寫入權限 (db_datawriter)
   --grant-execute                 授予執行預存程序權限 (EXECUTE)
@@ -786,21 +787,25 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   --users <user1,user2,...>       使用者清單（逗號分隔）
 
 範例:
-  # 建立使用者（單一使用者，單一資料庫）
-  $0 create-user --users app_user --databases MyAppDB --password 'StrongP@ss123' \\
+  # 設定使用者（單一使用者，單一資料庫）
+  $0 setup-user --users app_user --databases MyAppDB --password 'StrongP@ss123' \\
     --grant-read --grant-write --grant-execute
 
-  # 建立使用者（單一使用者，多個資料庫）
-  $0 create-user --users app_user --databases "DB1,DB2,DB3" --password 'StrongP@ss123' \\
+  # 設定使用者（單一使用者，多個資料庫）
+  $0 setup-user --users app_user --databases "DB1,DB2,DB3" --password 'StrongP@ss123' \\
     --grant-read --grant-write --grant-execute
 
-  # 建立使用者（多個使用者，單一資料庫）
-  $0 create-user --users "user1,user2,user3" --databases MyAppDB --password 'StrongP@ss123' \\
+  # 設定使用者（多個使用者，單一資料庫）
+  $0 setup-user --users "user1,user2,user3" --databases MyAppDB --password 'StrongP@ss123' \\
     --grant-read --grant-write
 
-  # 建立使用者（多個使用者，多個資料庫）
-  $0 create-user --users "user1,user2" --databases "DB1,DB2" --password 'StrongP@ss123' \\
+  # 設定使用者（多個使用者，多個資料庫）
+  $0 setup-user --users "user1,user2" --databases "DB1,DB2" --password 'StrongP@ss123' \\
     --grant-read --grant-write --grant-execute
+
+  # 為現有使用者授予額外權限（不需要密碼）
+  $0 setup-user --users existing_user --databases MyAppDB \\
+    --grant-execute
 
   # 查詢使用者權限
   $0 get-user john --format table
@@ -858,8 +863,8 @@ main() {
 
     # 執行命令
     case $command in
-        create-user)
-            cmd_create_user "$@"
+        setup-user|create-user)
+            cmd_setup_user "$@"
             ;;
         get-user)
             cmd_get_user "$@"

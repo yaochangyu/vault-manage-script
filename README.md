@@ -1,4 +1,16 @@
-# HashiCorp Vault 管理工具
+# Shell Script 管理工具集
+
+本專案包含三個獨立的 Shell Script 管理工具，用於簡化開發和運維工作。
+
+## 📦 包含工具
+
+1. **vault-manage.sh** - HashiCorp Vault KV secrets 管理工具
+2. **sql-permission.sh** - SQL Server 權限管理工具
+3. **create-database.sh** - SQL Server 資料庫建立工具
+
+---
+
+# 🔐 Vault 管理工具
 
 本地開發用的 Vault 管理命令行工具，使用 Shell Script 實作，支援 KV secrets 的完整 CRUD 操作。
 
@@ -315,6 +327,329 @@ brew install jq
 ## 更多範例
 
 請參考 [EXAMPLES.md](./EXAMPLES.md) 查看更多使用範例。
+
+---
+
+# 🗄️ SQL Server 權限管理工具
+
+功能強大的 SQL Server 使用者與權限管理工具，支援批次處理、多層級權限管理和多種輸出格式。
+
+## 功能特色
+
+- ✅ **使用者管理**：建立使用者或更新現有使用者權限
+- ✅ **多層級權限**：Server、Database、Object 三個層級
+- ✅ **批次處理**：支援 CSV/JSON 格式批次設定
+- ✅ **權限比對**：比較兩個使用者的權限差異
+- ✅ **多種輸出格式**：JSON、Table、CSV
+- ✅ **稽核日誌**：完整的操作記錄
+- ✅ **自動依賴檢查**：自動偵測並安裝 sqlcmd 和 jq
+
+## 系統需求
+
+- **Bash**: 4.0+
+- **sqlcmd**: SQL Server 命令列工具
+- **jq**: JSON 處理工具（選用）
+
+### 自動安裝依賴
+
+```bash
+# 執行安裝腳本（會自動偵測缺少的工具）
+./install-tools.sh
+```
+
+## 快速開始
+
+### 1. 設定環境變數
+
+```bash
+# 複製範本
+cp .env.example .env
+
+# 編輯 .env 檔案
+nano .env
+```
+
+填入 SQL Server 連線資訊：
+
+```bash
+# SQL Server 連線資訊
+SQL_SERVER=127.0.0.1
+SQL_PORT=1433
+ADMIN_USER=sa
+ADMIN_PASSWORD=YourStrongPassword!
+
+# 權限管理設定
+DEFAULT_OUTPUT_FORMAT=table
+ENABLE_AUDIT_LOG=true
+AUDIT_LOG_FILE=./audit.log
+```
+
+### 2. 測試連線
+
+```bash
+./sql-permission.sh test-connection
+```
+
+## 主要功能
+
+### 🔧 設定使用者與權限
+
+`setup-user` 命令可用於建立新使用者或更新現有使用者的權限。
+
+**命令別名**：`create-user`（向後兼容）
+
+#### 建立新使用者（完整權限）
+
+```bash
+./sql-permission.sh setup-user \
+  --users app_user \
+  --databases MyAppDB \
+  --password 'StrongP@ss123!' \
+  --grant-read \
+  --grant-write \
+  --grant-execute
+```
+
+#### 為現有使用者授予額外權限
+
+```bash
+# 不需要密碼
+./sql-permission.sh setup-user \
+  --users existing_user \
+  --databases MyAppDB \
+  --grant-execute
+```
+
+#### 批次設定多個使用者
+
+```bash
+# 多個使用者 + 多個資料庫
+./sql-permission.sh setup-user \
+  --users "user1,user2,user3" \
+  --databases "DB1,DB2,DB3" \
+  --password 'TeamPass123!' \
+  --grant-read \
+  --grant-write
+```
+
+### 📊 查詢權限
+
+```bash
+# 查詢特定使用者權限（表格格式）
+./sql-permission.sh get-user app_user --format table
+
+# 查詢特定使用者在特定資料庫的權限
+./sql-permission.sh get-user app_user --database MyAppDB --format table
+
+# 查詢所有使用者權限
+./sql-permission.sh get-all --format table
+
+# 輸出到 CSV 檔案
+./sql-permission.sh get-all --format csv --output permissions.csv
+```
+
+### ➕ 授予權限
+
+```bash
+# Server 層級角色
+./sql-permission.sh grant user1 --server-role sysadmin
+
+# Database 層級角色
+./sql-permission.sh grant user2 \
+  --database MyAppDB \
+  --db-role db_datareader,db_datawriter
+
+# 物件層級權限
+./sql-permission.sh grant user3 \
+  --database MyAppDB \
+  --object dbo.Members \
+  --permission SELECT,INSERT
+```
+
+### ➖ 撤銷權限
+
+```bash
+# 撤銷 Database 角色
+./sql-permission.sh revoke user1 \
+  --database MyAppDB \
+  --db-role db_datawriter
+
+# 撤銷物件權限
+./sql-permission.sh revoke user2 \
+  --database MyAppDB \
+  --object dbo.Members \
+  --permission INSERT
+```
+
+### 📦 批次處理
+
+```bash
+# 從 CSV 檔案批次授予權限
+./sql-permission.sh grant-batch --file permissions.csv
+
+# 命令列批次處理
+./sql-permission.sh grant-batch \
+  --users "user1,user2,user3" \
+  --database MyAppDB \
+  --db-role db_datareader
+```
+
+### 🔍 權限比對
+
+```bash
+# 比較兩個使用者的權限差異
+./sql-permission.sh compare user1 user2
+
+# 輸出到檔案
+./sql-permission.sh compare user1 user2 --output diff-report.txt
+```
+
+### 📋 列出可用角色
+
+```bash
+# 列出 Server 層級角色
+./sql-permission.sh list-server-roles
+
+# 列出 Database 層級角色
+./sql-permission.sh list-db-roles
+
+# 列出特定資料庫的自訂角色
+./sql-permission.sh list-db-roles --database MyAppDB
+```
+
+## 權限對照表
+
+| 參數 | SQL Server 角色/權限 | 說明 |
+|------|---------------------|------|
+| `--grant-read` | `db_datareader` | SELECT 所有資料表和檢視表 |
+| `--grant-write` | `db_datawriter` | INSERT、UPDATE、DELETE 所有資料表 |
+| `--grant-execute` | `EXECUTE` | 執行所有預存程序和函數 |
+
+## 常見使用場景
+
+### 場景 1：新專案初始化
+
+```bash
+# 1. 建立資料庫
+./create-database.sh --db MyAppDB
+
+# 2. 設定應用程式使用者（完整權限）
+./sql-permission.sh setup-user \
+  --users app_user \
+  --databases MyAppDB \
+  --password 'App#Secure2024!' \
+  --grant-read --grant-write --grant-execute
+
+# 3. 設定報表使用者（唯讀）
+./sql-permission.sh setup-user \
+  --users report_user \
+  --databases MyAppDB \
+  --password 'Report#Secure2024!' \
+  --grant-read
+
+# 4. 驗證權限
+./sql-permission.sh get-all --database MyAppDB --format table
+```
+
+### 場景 2：現有使用者權限升級
+
+```bash
+# 1. 查看現有權限
+./sql-permission.sh get-user readonly_user --database MyAppDB
+
+# 2. 授予執行權限（不需要密碼）
+./sql-permission.sh setup-user \
+  --users readonly_user \
+  --databases MyAppDB \
+  --grant-execute
+
+# 3. 驗證新權限
+./sql-permission.sh get-user readonly_user --database MyAppDB
+```
+
+### 場景 3：多環境部署
+
+```bash
+# 同一使用者部署到多個環境資料庫
+./sql-permission.sh setup-user \
+  --users api_service \
+  --databases "DevDB,TestDB,ProductionDB" \
+  --password 'ApiService#2024!' \
+  --grant-read --grant-write
+```
+
+## 安全注意事項
+
+1. **密碼強度**
+   - 建議使用至少 12 字元，包含大小寫、數字、特殊符號
+   - 範例：`Str0ng#Passw0rd!2024`
+
+2. **權限最小化原則**
+   - 僅授予必要的權限
+   - 唯讀使用者不要授予寫入或執行權限
+   - 測試環境和生產環境使用不同的使用者
+
+3. **稽核日誌**
+   - 所有權限變更操作都會記錄在 `audit.log`
+   - 定期審查日誌，追蹤權限變更歷史
+
+4. **環境變數管理**
+   - `.env` 檔案已加入 `.gitignore`，絕不納入版控
+   - 設定檔案權限：`chmod 600 .env`
+
+## 疑難排解
+
+### 問題：sqlcmd: command not found
+
+執行安裝腳本：
+
+```bash
+./install-tools.sh
+```
+
+或手動安裝：
+
+```bash
+# Ubuntu/Debian
+curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+curl https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+sudo apt-get update
+sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18
+
+# 加入 PATH
+export PATH="$PATH:/opt/mssql-tools18/bin"
+```
+
+### 問題：連線失敗
+
+1. 檢查 SQL Server 是否執行中
+2. 確認 `.env` 中的連線資訊正確
+3. 測試連線：
+   ```bash
+   ./sql-permission.sh test-connection
+   ```
+
+### 問題：密碼不符合策略
+
+使用更強的密碼：
+- 至少 8 個字元
+- 包含大小寫字母、數字、特殊符號
+- 範例：`StrongP@ssw0rd123!`
+
+### 問題：權限授予失敗
+
+1. 確認執行腳本的帳號有足夠權限（建議使用 `sa` 或有 `sysadmin` 權限的帳號）
+2. 使用 `VERBOSE=true` 查看詳細錯誤：
+   ```bash
+   VERBOSE=true ./sql-permission.sh setup-user --users app_user ...
+   ```
+
+## 更多資訊
+
+- 完整文檔：`.claude/CLAUDE.md`
+- SQL 權限管理詳細說明：`SQL-PERMISSION-README.md`
+
+---
 
 ## 授權
 

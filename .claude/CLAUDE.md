@@ -33,9 +33,12 @@ sql-permission.sh (主程式)
 │   ├── test_connection() 測試連線
 │   └── execute_sql*()   SQL 執行包裝函式（3 種變體）
 ├── lib/query.sh         查詢與權限管理
+│   ├── create_login()   建立 Server 層級 Login
+│   ├── create_user()    建立 Database 層級 User
 │   ├── get_*_roles()    查詢權限（3 層級）
 │   ├── grant_*()        授予權限（3 層級）
-│   └── revoke_*()       撤銷權限（3 層級）
+│   ├── revoke_*()       撤銷權限（3 層級）
+│   └── grant_execute_permission() 授予 EXECUTE 權限
 ├── lib/parser.sh        批次處理
 │   ├── parse_csv()      CSV 解析器
 │   ├── parse_json()     JSON 解析器
@@ -126,6 +129,17 @@ set +a
 ### SQL Server 權限管理
 
 ```bash
+# 設定使用者並授予權限（支援建立新使用者或更新現有使用者權限）
+./sql-permission.sh setup-user --users app_user --databases MyAppDB \
+  --password 'StrongP@ss123!' --grant-read --grant-write --grant-execute
+
+./sql-permission.sh setup-user --users "user1,user2" --databases "DB1,DB2" \
+  --password 'StrongP@ss123!' --grant-read --grant-write --grant-execute
+
+# 為現有使用者授予額外權限（不需要密碼）
+./sql-permission.sh setup-user --users existing_user --databases MyAppDB \
+  --grant-execute
+
 # 查詢權限（支援 3 種格式：json/table/csv）
 ./sql-permission.sh get-user <username> --format table
 ./sql-permission.sh get-all --format csv --output all-permissions.csv
@@ -243,6 +257,366 @@ user3,grant,object,dbo.Table,SELECT,MyDB
    - 準備測試 CSV/JSON 檔案
    - 執行 grant-batch
    - 驗證權限正確性
+
+## 使用者管理功能
+
+### setup-user 命令
+
+`setup-user` 命令提供快速設定 SQL Server 使用者並授予權限的功能。可用於建立新使用者或更新現有使用者的權限。
+
+**命令別名**：`create-user`（向後兼容）
+
+#### 主要特性
+
+- ✅ 支援建立新使用者或更新現有使用者權限
+- ✅ 支援同時處理多個使用者（逗號分隔）
+- ✅ 支援同時在多個資料庫設定使用者（逗號分隔）
+- ✅ 自動檢查使用者和資料庫是否存在（避免重複建立）
+- ✅ 提供三種權限選項：讀取、寫入、執行預存程序
+- ✅ 操作前確認機制（防止誤操作）
+- ✅ 完成後自動顯示權限摘要
+
+#### 基本用法
+
+```bash
+# 設定單一使用者（完整權限）
+./sql-permission.sh setup-user \
+  --users app_user \
+  --databases MyAppDB \
+  --password 'StrongP@ss123!' \
+  --grant-read \
+  --grant-write \
+  --grant-execute
+
+# 設定多個使用者，多個資料庫
+./sql-permission.sh setup-user \
+  --users "user1,user2,user3" \
+  --databases "DB1,DB2,DB3" \
+  --password 'StrongP@ss123!' \
+  --grant-read \
+  --grant-write \
+  --grant-execute
+
+# 設定唯讀使用者
+./sql-permission.sh setup-user \
+  --users readonly_user \
+  --databases MyAppDB \
+  --password 'ReadOnly123!' \
+  --grant-read
+
+# 設定讀寫使用者（無執行權限）
+./sql-permission.sh setup-user \
+  --users dataentry_user \
+  --databases MyAppDB \
+  --password 'DataEntry123!' \
+  --grant-read \
+  --grant-write
+
+# 為現有使用者授予額外權限（不需密碼）
+./sql-permission.sh setup-user \
+  --users existing_user \
+  --databases MyAppDB \
+  --grant-execute
+```
+
+#### 參數說明
+
+| 參數 | 必要 | 說明 |
+|------|------|------|
+| `--users` | ✅ | 使用者名稱（可用逗號分隔多個） |
+| `--databases` | ✅ | 資料庫名稱（可用逗號分隔多個） |
+| `--password` | 條件 | 使用者密碼（建立新使用者時必填，更新現有使用者時可省略） |
+| `--grant-read` | ❌ | 授予讀取權限（db_datareader） |
+| `--grant-write` | ❌ | 授予寫入權限（db_datawriter） |
+| `--grant-execute` | ❌ | 授予執行預存程序權限（EXECUTE） |
+
+#### 權限對照
+
+| 參數 | SQL Server 角色/權限 | 說明 |
+|------|---------------------|------|
+| `--grant-read` | `db_datareader` | SELECT 所有資料表和檢視表 |
+| `--grant-write` | `db_datawriter` | INSERT, UPDATE, DELETE 所有資料表 |
+| `--grant-execute` | `EXECUTE` | 執行所有預存程序和函數 |
+
+#### 執行流程
+
+1. **檢查/建立 Login** - 檢查 Server 層級登入帳號是否存在，不存在則建立
+2. **檢查/建立 User** - 檢查每個資料庫的使用者是否存在，不存在則建立
+3. **授予權限** - 根據選項授予對應的權限（無論使用者是否已存在）
+4. **顯示摘要** - 列出每個使用者在每個資料庫的最終權限狀態
+
+#### 使用範例場景
+
+**場景 1：新專案初始化**
+```bash
+# 設定應用程式使用者
+./sql-permission.sh setup-user \
+  --users prod_app_user \
+  --databases ProductionDB \
+  --password 'App#Secure2024!' \
+  --grant-read --grant-write --grant-execute
+
+# 設定報表使用者
+./sql-permission.sh setup-user \
+  --users prod_report_user \
+  --databases ProductionDB \
+  --password 'Report#Secure2024!' \
+  --grant-read
+```
+
+**場景 2：多環境部署**
+```bash
+# 同一使用者部署到多個環境資料庫
+./sql-permission.sh setup-user \
+  --users api_user \
+  --databases "DevDB,StagingDB,ProductionDB" \
+  --password 'ApiUser#2024!' \
+  --grant-read --grant-write
+```
+
+**場景 3：團隊成員帳號**
+```bash
+# 為團隊成員批次建立開發帳號
+./sql-permission.sh setup-user \
+  --users "dev1,dev2,dev3,dev4" \
+  --databases "DevDB,TestDB" \
+  --password 'DevTeam#2024!' \
+  --grant-read --grant-write --grant-execute
+```
+
+**場景 4：為現有使用者授予額外權限**
+```bash
+# 為現有的唯讀使用者追加執行權限
+./sql-permission.sh setup-user \
+  --users readonly_user \
+  --databases ProductionDB \
+  --grant-execute
+
+# 為現有使用者在新資料庫設定權限
+./sql-permission.sh setup-user \
+  --users existing_user \
+  --databases NewDB \
+  --grant-read --grant-write
+```
+
+### 常見問題與疑難排解
+
+#### 問題 1：Login 已存在
+
+**情況**：
+```
+⚠ 警告: Login 'app_user' 已存在，跳過建立
+```
+
+**說明**：這是正常訊息，表示 Login 已存在於 Server 層級，腳本會自動跳過建立步驟。
+
+**處理方式**：
+- 如果是為現有使用者授予權限，這是預期行為
+- 腳本會繼續執行，為使用者授予新的權限
+- 如果想要重新建立使用者，需要先手動刪除：
+  ```sql
+  DROP LOGIN [app_user];
+  ```
+
+#### 問題 2：User 已存在
+
+**情況**：
+```
+⚠ 警告: User 'app_user' 在資料庫 'MyAppDB' 已存在，跳過建立
+```
+
+**說明**：這是正常訊息，表示 User 已存在於該資料庫。
+
+**處理方式**：
+- 腳本會繼續執行，為現有使用者授予新的權限
+- 權限是累加的，不會移除現有權限
+- 如果想要重設權限，需要先使用 `revoke` 命令撤銷現有權限
+
+#### 問題 3：資料庫不存在
+
+**錯誤訊息**：
+```
+✗ 錯誤: 資料庫 'NonExistentDB' 不存在
+```
+
+**解決方案**：
+- 先建立資料庫：
+  ```bash
+  ./create-database.sh --db NonExistentDB
+  ```
+- 或者修改 `--databases` 參數使用已存在的資料庫
+
+#### 問題 4：密碼不符合策略
+
+**錯誤訊息**：
+```
+Password validation failed. The password does not meet SQL Server password policy requirements...
+```
+
+**解決方案**：
+- 使用更強的密碼（至少 8 個字元，包含大小寫字母、數字、特殊符號）
+- 範例：`StrongP@ssw0rd123!`
+- 檢查 SQL Server 的密碼策略設定
+
+#### 問題 5：權限授予失敗
+
+**錯誤訊息**：
+```
+✗ 錯誤: 授予 Database 角色失敗
+```
+
+**可能原因**：
+1. 執行腳本的帳號沒有足夠權限
+2. 資料庫角色名稱錯誤
+3. 使用者不存在於該資料庫
+
+**解決方案**：
+1. 確認 `.env` 中的 `ADMIN_USER` 有 `sysadmin` 權限
+2. 檢查角色名稱拼寫（使用 `./sql-permission.sh list-db-roles` 查看可用角色）
+3. 使用 `VERBOSE=true` 查看詳細錯誤訊息：
+   ```bash
+   VERBOSE=true ./sql-permission.sh setup-user --users app_user ...
+   ```
+
+### 完整工作流程範例
+
+#### 工作流程 1：新專案三種角色設定
+
+```bash
+# 1. 確認資料庫已存在
+./sql-permission.sh test-connection
+
+# 2. 建立應用程式使用者（完整權限）
+./sql-permission.sh setup-user \
+  --users prod_app_user \
+  --databases ProductionDB \
+  --password 'App#Secure2024!' \
+  --grant-read \
+  --grant-write \
+  --grant-execute
+
+# 3. 建立 API 使用者（讀寫權限）
+./sql-permission.sh setup-user \
+  --users prod_api_user \
+  --databases ProductionDB \
+  --password 'Api#Secure2024!' \
+  --grant-read \
+  --grant-write
+
+# 4. 建立報表使用者（唯讀權限）
+./sql-permission.sh setup-user \
+  --users prod_report_user \
+  --databases ProductionDB \
+  --password 'Report#Secure2024!' \
+  --grant-read
+
+# 5. 驗證所有使用者權限
+./sql-permission.sh get-all --database ProductionDB --format table
+
+# 6. 比較使用者權限
+./sql-permission.sh compare prod_app_user prod_api_user
+./sql-permission.sh compare prod_api_user prod_report_user
+```
+
+#### 工作流程 2：現有使用者權限升級
+
+```bash
+# 1. 查看現有權限
+./sql-permission.sh get-user readonly_user --database MyAppDB --format table
+
+# 2. 為唯讀使用者授予執行權限（不需要密碼）
+./sql-permission.sh setup-user \
+  --users readonly_user \
+  --databases MyAppDB \
+  --grant-execute
+
+# 3. 驗證新權限
+./sql-permission.sh get-user readonly_user --database MyAppDB --format table
+```
+
+#### 工作流程 3：多環境部署
+
+```bash
+# 在開發、測試、生產環境同時設定相同使用者
+./sql-permission.sh setup-user \
+  --users api_service \
+  --databases "DevDB,TestDB,ProductionDB" \
+  --password 'ApiService#2024!' \
+  --grant-read \
+  --grant-write \
+  --grant-execute
+
+# 分別驗證各環境權限
+./sql-permission.sh get-user api_service --database DevDB --format table
+./sql-permission.sh get-user api_service --database TestDB --format table
+./sql-permission.sh get-user api_service --database ProductionDB --format table
+```
+
+### 與其他命令的整合
+
+#### 與 create-database.sh 整合
+
+```bash
+# 1. 建立資料庫
+./create-database.sh --db MyNewDB --data-size 200 --data-growth 100
+
+# 2. 設定使用者並授予權限
+./sql-permission.sh setup-user \
+  --users app_user \
+  --databases MyNewDB \
+  --password 'NewDB#Pass2024!' \
+  --grant-read \
+  --grant-write \
+  --grant-execute
+
+# 3. 驗證
+./sql-permission.sh get-user app_user --database MyNewDB --format table
+```
+
+#### 批次處理
+
+如果需要設定大量使用者，建議使用批次處理功能：
+
+```bash
+# 先設定使用者
+./sql-permission.sh setup-user \
+  --users "user1,user2,user3,user4,user5" \
+  --databases MyAppDB \
+  --password 'Batch#Pass2024!' \
+  --grant-read \
+  --grant-write
+
+# 然後用 grant-batch 授予不同的權限
+./sql-permission.sh grant-batch --file custom-permissions.csv
+```
+
+### 常用命令速查
+
+#### 標準使用模式
+
+| 使用場景 | 命令 |
+|---------|------|
+| 應用程式使用者 | `setup-user --users app_user --databases MyDB --password 'Pass!' --grant-read --grant-write --grant-execute` |
+| API 使用者 | `setup-user --users api_user --databases MyDB --password 'Pass!' --grant-read --grant-write` |
+| 報表使用者 | `setup-user --users report_user --databases MyDB --password 'Pass!' --grant-read` |
+| 權限升級 | `setup-user --users existing_user --databases MyDB --grant-execute` |
+| 多環境部署 | `setup-user --users app_user --databases "DB1,DB2,DB3" --password 'Pass!' --grant-read --grant-write` |
+
+#### 驗證命令
+
+```bash
+# 查看使用者權限
+./sql-permission.sh get-user <username> --database <dbname> --format table
+
+# 測試連線
+sqlcmd -S 127.0.0.1,1433 -U <username> -P '<password>' -C -Q "SELECT @@VERSION;"
+
+# 查看所有使用者
+./sql-permission.sh get-all --format table
+
+# 比較權限
+./sql-permission.sh compare user1 user2
+```
 
 ## 安全考量
 
