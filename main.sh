@@ -66,33 +66,33 @@ info() {
 # 顯示使用說明
 show_usage() {
     cat << EOF
-${CYAN}SQL Server 使用者自動化佈建工具${NC}
+SQL Server 使用者自動化佈建工具
 
-${BLUE}使用方法：${NC}
+使用方法：
   $0 [選項]
 
-${BLUE}必要選項：${NC}
+必要選項：
   --username <username>           使用者帳號（單一帳號）
   --databases <db1,db2,...>       資料庫清單（逗號分隔）
   --vault-paths <path1,path2,...> Vault Secret 路徑清單（逗號分隔）
 
-${BLUE}權限選項：${NC}
+權限選項：
   --grant-read                    授予讀取權限 (db_datareader)
   --grant-write                   授予寫入權限 (db_datawriter)
   --grant-execute                 授予執行預存程序權限 (EXECUTE)
 
-${BLUE}密碼選項：${NC}
+密碼選項：
   --password <password>           手動指定密碼（若不指定則自動產生）
   --password-length <length>      密碼長度（預設：32）
 
-${BLUE}其他選項：${NC}
+其他選項：
   --vault-mount <mount>           Vault mount point（預設：secrets）
   --dry-run                       預覽操作但不實際執行
   -h, --help                      顯示此說明
 
-${BLUE}範例：${NC}
+範例：
 
-  ${GREEN}# 基本使用：建立使用者並授予讀寫權限${NC}
+  # 基本使用：建立使用者並授予讀寫權限
   $0 \\
     --username app_user \\
     --databases "MyAppDB,TestDB" \\
@@ -100,14 +100,14 @@ ${BLUE}範例：${NC}
     --grant-read \\
     --grant-write
 
-  ${GREEN}# 建立唯讀使用者${NC}
+  # 建立唯讀使用者
   $0 \\
     --username report_user \\
     --databases "MyAppDB" \\
     --vault-paths "teams/reports/db-user" \\
     --grant-read
 
-  ${GREEN}# 使用自訂密碼${NC}
+  # 使用自訂密碼
   $0 \\
     --username api_user \\
     --databases "MyAppDB" \\
@@ -117,7 +117,7 @@ ${BLUE}範例：${NC}
     --grant-write \\
     --grant-execute
 
-  ${GREEN}# 預覽模式（不實際執行）${NC}
+  # 預覽模式（不實際執行）
   $0 \\
     --username test_user \\
     --databases "TestDB" \\
@@ -125,16 +125,16 @@ ${BLUE}範例：${NC}
     --grant-read \\
     --dry-run
 
-${BLUE}工作流程：${NC}
+工作流程：
   1. 產生強密碼（或使用指定密碼）
   2. 呼叫 sql-permission.sh 建立 SQL Server Login/User 並授予權限
   3. 呼叫 vault-manage.sh 將帳號密碼寫入所有指定的 Vault 路徑
 
-${BLUE}環境變數：${NC}
-  ${YELLOW}SQL Server 連線資訊：${NC}
+環境變數：
+  SQL Server 連線資訊：
     SQL_SERVER, SQL_PORT, ADMIN_USER, ADMIN_PASSWORD
 
-  ${YELLOW}Vault 連線資訊：${NC}
+  Vault 連線資訊：
     VAULT_ADDR, VAULT_USERNAME, VAULT_PASSWORD, VAULT_SKIP_VERIFY
 
 EOF

@@ -836,32 +836,32 @@ cmd_test_connection() {
 # 顯示說明
 cmd_help() {
     cat << EOF
-${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
+SQL Server 權限管理工具 v${VERSION}
 
 使用方式:
   $0 <command> [options]
 
 命令:
-  ${CYAN}使用者管理${NC}
+  使用者管理
     setup-user [options]          設定使用者並授予權限（支援建立新使用者或更新現有使用者）
                                   別名: create-user
 
-  ${CYAN}查詢權限${NC}
+  查詢權限
     get-user <username>           查詢特定使用者的權限
     get-all                       查詢所有使用者的權限
 
-  ${CYAN}設定權限${NC}
+  設定權限
     grant <username> [options]    授予權限
     revoke <username> [options]   撤銷權限
 
-  ${CYAN}批次處理${NC}
+  批次處理
     grant-batch [options]         批次授予權限
     revoke-batch [options]        批次撤銷權限
 
-  ${CYAN}權限比對${NC}
+  權限比對
     compare <user1> <user2>       比較兩個使用者的權限差異
 
-  ${CYAN}其他${NC}
+  其他
     list-server-roles             列出 Server 層級角色
     list-db-roles                 列出 Database 層級角色
     test-connection               測試 SQL Server 連線
@@ -876,7 +876,7 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   --verbose                       詳細輸出
 
 設定使用者選項 (setup-user):
-  ${YELLOW}命令列模式：${NC}
+  命令列模式：
   --users <user1,user2,...>       使用者名稱（逗號分隔支援多個）
   --databases <db1,db2,...>       資料庫名稱（逗號分隔支援多個）
   --password <password>           使用者密碼（建立新使用者時必填）
@@ -884,7 +884,7 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   --grant-write                   授予寫入權限 (db_datawriter)
   --grant-execute                 授予執行預存程序權限 (EXECUTE)
 
-  ${YELLOW}檔案模式：${NC}
+  檔案模式：
   --file <file>                   從檔案讀取使用者設定（支援 CSV 和 JSON 格式）
                                   範本檔案：templates/setup-users.csv.example
                                            templates/setup-users.json.example
@@ -900,7 +900,7 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   --users <user1,user2,...>       使用者清單（逗號分隔）
 
 範例:
-  ${CYAN}# 命令列模式${NC}
+  # 命令列模式
   # 設定使用者（單一使用者，單一資料庫）
   $0 setup-user --users app_user --databases MyAppDB --password 'StrongP@ss123' \\
     --grant-read --grant-write --grant-execute
@@ -921,7 +921,7 @@ ${GREEN}SQL Server 權限管理工具 v${VERSION}${NC}
   $0 setup-user --users existing_user --databases MyAppDB \\
     --grant-execute
 
-  ${CYAN}# 檔案模式（批次處理）${NC}
+  # 檔案模式（批次處理）
   # 從 CSV 檔案批次建立使用者
   $0 setup-user --file setup-users.csv
 
