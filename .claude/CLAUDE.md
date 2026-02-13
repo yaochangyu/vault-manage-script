@@ -6,8 +6,14 @@ Bash 腳本工具集，整合 HashiCorp Vault (KV v2) 與 SQL Server 權限管�
 
 **工作流程**：
 ```bash
-./docker-init.sh DB1 DB2  # 啟動容器 (SQL Server + Vault) + 建立資料庫
-./vault-init.sh           # 初始化 Vault userpass 認證
+# 方式 1：分步執行
+./docker-init.sh DB1 DB2           # 啟動容器 + 建立資料庫
+./docker-init.sh --init-vault      # 初始化 Vault userpass 認證（需 .env 檔案）
+
+# 方式 2：一次完成（推薦）
+./docker-init.sh --init-vault DB1 DB2  # 啟動容器 + 建立資料庫 + 初始化 Vault
+
+# 使用者佈建
 ./main.sh --username user1 --databases DB1 --vault-paths /app/db1 --grant-read
 ```
 
@@ -50,8 +56,8 @@ app_user,grant,database,MyDB,db_datareader,MyDB  # 逗號數量必須正確
 # Dry-run 預覽 (不實際執行)
 ./sql-permission.sh grant user1 --server-role sysadmin --dry-run
 
-# Docker 完整測試
-./docker-init.sh TestDB && ./vault-init.sh && ./main.sh --username test --databases TestDB --vault-paths /test --grant-read
+# Docker 完整測試（一次完成）
+./docker-init.sh --init-vault TestDB && ./main.sh --username test --databases TestDB --vault-paths /test --grant-read
 
 # 檢查稽核日誌 (ENABLE_AUDIT_LOG=true)
 tail -f audit.log
