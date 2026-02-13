@@ -38,13 +38,6 @@ main.sh                    # 主要腳本：整合 SQL 使用者建立與 Vault 
 ```bash
 # 執行安裝腳本
 ./install-tools.sh
-
-# 或手動安裝
-# Ubuntu/Debian
-sudo apt-get install openssl curl
-
-# macOS
-brew install openssl curl
 ```
 
 ### 環境需求
